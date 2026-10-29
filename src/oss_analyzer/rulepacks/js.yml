@@ -1,0 +1,29 @@
+packs:
+  - framework: express
+    detect: {manifests: [package.json], contains: ["\"express\""]}
+    rules:
+      - id: express-route-js
+        kind: http
+        language: javascript
+        name: PATH
+        handler: ARGS
+        rule:
+          pattern: "$APP.$M($PATH, $$$ARGS)"
+        constraints:
+          M: {regex: "^(get|post|put|delete|patch|all|options|head)$"}
+          PATH: {kind: string}
+      - id: express-route-ts
+        kind: http
+        language: typescript
+        name: PATH
+        handler: ARGS
+        rule:
+          pattern: "$APP.$M($PATH, $$$ARGS)"
+        constraints:
+          M: {regex: "^(get|post|put|delete|patch|all|options|head)$"}
+          PATH: {kind: string}
+detect_only:
+  - {framework: nestjs, manifests: [package.json], contains: ["@nestjs/core"]}
+# nextjs 는 파일 기반 라우팅이라 규칙팩 대신 core/nextjs.py 가 처리한다
+  - {framework: fastify, manifests: [package.json], contains: ["\"fastify\""]}
+  - {framework: koa, manifests: [package.json], contains: ["\"koa\""]}

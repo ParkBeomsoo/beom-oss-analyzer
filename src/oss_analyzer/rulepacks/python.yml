@@ -1,0 +1,25 @@
+packs:
+  - framework: fastapi-flask
+    detect: {manifests: [requirements.txt, pyproject.toml, setup.py, setup.cfg, Pipfile], contains: ["fastapi", "flask"]}
+    rules:
+      - id: py-route-decorator
+        kind: http
+        language: python
+        rule:
+          kind: decorator
+          regex: "^@\\w+\\.(get|post|put|delete|patch|route|api_route|websocket)\\("
+  - framework: python
+    detect: {extensions: [".py"]}
+    rules:
+      - id: py-main-guard
+        kind: main
+        language: python
+        rule: {pattern: "if __name__ == \"__main__\": $$$"}
+      - id: py-argparse
+        kind: cli
+        language: python
+        rule: {pattern: "argparse.ArgumentParser($$$)"}
+detect_only:
+  - {framework: django, manifests: [requirements.txt, pyproject.toml, setup.py], contains: ["django"]}
+  - {framework: celery, manifests: [requirements.txt, pyproject.toml, setup.py], contains: ["celery"]}
+  - {framework: click, manifests: [requirements.txt, pyproject.toml, setup.py], contains: ["click"]}

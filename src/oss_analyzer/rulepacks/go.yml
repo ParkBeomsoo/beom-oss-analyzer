@@ -1,0 +1,31 @@
+packs:
+  - framework: gin
+    detect: {manifests: [go.mod], contains: ["gin-gonic/gin"]}
+    rules:
+      - id: gin-route
+        kind: http
+        language: go
+        name: PATH
+        handler: ARGS
+        rule:
+          pattern: "$R.$M($PATH, $$$ARGS)"
+        constraints:
+          M: {regex: "^(GET|POST|PUT|DELETE|PATCH|Any|Handle)$"}
+  - framework: go
+    detect: {extensions: [".go"]}
+    rules:
+      - id: go-main
+        kind: main
+        language: go
+        rule: {pattern: "func main() { $$$ }"}
+      - id: go-http-handle
+        kind: http
+        language: go
+        name: PATH
+        handler: H
+        rule: {pattern: "http.HandleFunc($PATH, $H)"}
+detect_only:
+  - {framework: echo, manifests: [go.mod], contains: ["labstack/echo"]}
+  - {framework: fiber, manifests: [go.mod], contains: ["gofiber/fiber"]}
+  - {framework: cobra, manifests: [go.mod], contains: ["spf13/cobra"]}
+  - {framework: grpc-go, manifests: [go.mod], contains: ["google.golang.org/grpc"]}

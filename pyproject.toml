@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oss-analyzer"
+version = "0.1.0"
+description = "오픈소스 저장소를 단위별로 전수 분석하는 MCP 툴킷 — 근거(파일:줄)·미확인 목록·커버리지·검증 등급(L0~L3)"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=2.3,<3",
+    "multilspy>=0.1.1",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+oss-analyzer-mcp = "oss_analyzer.main:main"
+oss-analyzer = "oss_analyzer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"oss_analyzer.rulepacks" = ["*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

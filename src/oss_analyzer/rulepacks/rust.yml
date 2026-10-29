@@ -1,0 +1,101 @@
+# 진입점 규칙팩 — 각 rule 은 ast-grep 규칙 + 우리 메타데이터(kind, name, handler)
+# name/handler 는 메타변수 이름. name 이 문자열 리터럴이 아니면 "동적 진입점"으로 미확인 등록된다.
+packs:
+  - framework: axum
+    detect: {manifests: [Cargo.toml], contains: ["axum"]}
+    rules:
+      - id: axum-route
+        kind: http
+        language: rust
+        name: PATH
+        handler: ARGS
+        rule: {pattern: "$R.route($PATH, $$$ARGS)"}
+      - id: axum-nest
+        kind: http-mount
+        language: rust
+        name: PATH
+        handler: SUB
+        rule: {pattern: "$R.nest($PATH, $SUB)"}
+  - framework: actix-web
+    detect: {manifests: [Cargo.toml], contains: ["actix-web"]}
+    rules:
+      - id: actix-attr-route
+        kind: http
+        language: rust
+        extract: attr_path
+        rule:
+          kind: attribute_item
+          regex: '^#\[(?:actix_web::)?(get|post|put|delete|patch|head|route)\s*\(\s*"'
+      - id: actix-resource
+        kind: http
+        language: rust
+        name: PATH
+        rule: {pattern: "web::resource($PATH)"}
+      - id: actix-scope
+        kind: http-mount
+        language: rust
+        name: PATH
+        rule: {pattern: "web::scope($PATH)"}
+      - id: actix-route
+        kind: http
+        language: rust
+        name: PATH
+        handler: ARGS
+        rule: {pattern: "$R.route($PATH, $$$ARGS)"}
+  # 선언형 라우트 표 매크로 ("경로" => verb(handler) / sub(하위표)) — core/routetable.py 가 해석
+  - framework: route-table-macro
+    detect: {extensions: [".rs"]}
+    rules:
+      - id: rust-route-table-attr
+        kind: route-table
+        language: rust
+        extract: arrow_table
+        rule:
+          kind: attribute_item
+          regex: '"\s*=>\s*(\[|sub\s*\(|get\s*\(|post\s*\(|put\s*\(|patch\s*\(|delete\s*\()'
+      - id: rust-route-table-macro
+        kind: route-table
+        language: rust
+        extract: arrow_table
+        rule:
+          kind: macro_definition
+          regex: '(?:"|\$\w+)\s*=>\s*\[\s*(?:get|post|put|patch|delete)\s*\('
+  - framework: clap
+    detect: {manifests: [Cargo.toml], contains: ["clap"]}
+    rules:
+      - id: clap-parser
+        kind: cli
+        language: rust
+        rule:
+          kind: attribute_item
+          regex: "derive\\([^)]*\\b(Parser|Subcommand)\\b"
+  - framework: rust
+    detect: {extensions: [".rs"]}
+    rules:
+      - id: rust-main
+        kind: main
+        language: rust
+        rule: {pattern: "fn main() { $$$ }"}
+      - id: rust-async-main
+        kind: main
+        language: rust
+        rule: {pattern: "async fn main() { $$$ }"}
+      - id: rust-tokio-spawn
+        kind: background-task
+        language: rust
+        rule: {pattern: "tokio::spawn($$$)"}
+      # 소스 파일 안의 테스트 영역 — 여기 걸린 진입점은 기능 카탈로그에서 테스트로 구분된다
+      - id: rust-cfg-test-module
+        kind: test-region
+        language: rust
+        rule:
+          kind: mod_item
+          follows:
+            kind: attribute_item
+            regex: cfg\(test\)
+# 감지는 하지만 아직 규칙이 없는 프레임워크 → 미확인 등록
+detect_only:
+  - {framework: rocket, manifests: [Cargo.toml], contains: ["rocket"]}
+  - {framework: warp, manifests: [Cargo.toml], contains: ["warp"]}
+  - {framework: tonic, manifests: [Cargo.toml], contains: ["tonic"]}
+  - {framework: tokio-cron-scheduler, manifests: [Cargo.toml], contains: ["tokio-cron-scheduler"]}

@@ -1,0 +1,33 @@
+# Meilisearch v1.56.0 (커밋 47567abc) 정답 사실 — 저장소 코드에서 직접 확인한 것.
+# 분석 결과(report.json)가 각 사실을 해당 파일 근거와 함께 결론으로 담았는지 채점한다 (eval/score.py).
+# 라우트 카탈로그는 공식 릴리스의 meilisearch-openapi.json 과 eval/routes_vs_openapi.py 로 따로 채점한다.
+project: meilisearch-47567abc
+facts:
+  - id: bearer-auth
+    description: 요청 인증은 Authorization 헤더의 Bearer 토큰으로 한다
+    path: crates/meilisearch/src/extractors/authentication/mod.rs
+    keywords: [Bearer, Authorization]
+  - id: tenant-token
+    description: 테넌트 토큰(JWT)을 검증하고 만료·허용 인덱스 밖 접근을 거부한다
+    path: crates/meilisearch/src/extractors/authentication/mod.rs
+    keywords: [테넌트, tenant, JWT, 만료, exp]
+  - id: key-hmac
+    description: API 키 값은 마스터 키로 키 uid 를 HMAC-SHA256 해서 만든다
+    path: crates/meilisearch-auth/src/store.rs
+    keywords: [HMAC, Hmac, SHA256, Sha256]
+  - id: health-public
+    description: GET /health 는 인증 없이 열려 있다 (security() 비어 있음)
+    path: crates/meilisearch/src/routes/mod.rs
+    keywords: [health, 헬스, 인증 없이, 공개]
+  - id: pagination-default
+    description: 목록 API 의 기본 페이지 크기는 20
+    path: crates/meilisearch/src/routes/mod.rs
+    keywords: ["20", 페이지]
+  - id: task-cancel-filter
+    description: 작업 취소·삭제는 필터가 없으면 missing_task_filters 오류
+    path: crates/meilisearch/src/routes/tasks.rs
+    keywords: [missing_task_filters, 필터]
+  - id: search-get-post
+    description: 검색은 GET·POST /indexes/{index_uid}/search 둘 다 제공
+    path: crates/meilisearch/src/routes/indexes/search.rs
+    keywords: [GET, POST, search, 검색]

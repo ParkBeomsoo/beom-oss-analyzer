@@ -1,0 +1,36 @@
+packs:
+  - framework: spring
+    detect: {manifests: [pom.xml, build.gradle, build.gradle.kts], contains: ["spring-boot", "springframework"]}
+    rules:
+      - id: spring-mapping
+        kind: http
+        language: java
+        rule:
+          any:
+            - {kind: annotation, regex: "^@(Get|Post|Put|Delete|Patch|Request)Mapping"}
+            - {kind: marker_annotation, regex: "^@(Get|Post|Put|Delete|Patch|Request)Mapping"}
+      - id: spring-scheduled
+        kind: scheduler
+        language: java
+        rule:
+          any:
+            - {kind: annotation, regex: "^@Scheduled"}
+            - {kind: marker_annotation, regex: "^@Scheduled"}
+      - id: spring-listener
+        kind: listener
+        language: java
+        rule:
+          any:
+            - {kind: annotation, regex: "^@(KafkaListener|RabbitListener|JmsListener|EventListener|SqsListener)"}
+            - {kind: marker_annotation, regex: "^@(KafkaListener|RabbitListener|JmsListener|EventListener|SqsListener)"}
+  - framework: java
+    detect: {extensions: [".java"]}
+    rules:
+      - id: java-main
+        kind: main
+        language: java
+        rule: {pattern: "public static void main(String[] $A) { $$$ }"}
+detect_only:
+  - {framework: quarkus, manifests: [pom.xml, build.gradle], contains: ["quarkus"]}
+  - {framework: micronaut, manifests: [pom.xml, build.gradle], contains: ["micronaut"]}
+  - {framework: ktor, manifests: [build.gradle.kts, build.gradle], contains: ["ktor"]}
