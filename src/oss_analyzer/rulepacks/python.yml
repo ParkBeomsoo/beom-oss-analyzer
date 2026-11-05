@@ -5,6 +5,7 @@ packs:
       - id: py-route-decorator
         kind: http
         language: python
+        extract: py_decorator
         rule:
           kind: decorator
           regex: "^@\\w+\\.(get|post|put|delete|patch|route|api_route|websocket)\\("

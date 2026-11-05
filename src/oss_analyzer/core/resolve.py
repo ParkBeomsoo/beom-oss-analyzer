@@ -385,7 +385,8 @@ class Resolver:
         if not re.fullmatch(IDENT, name):
             return None
         lines = self.lines(scope.path)
-        pat = re.compile(rf"(?:\blet\s+(?:mut\s+)?|\bconst\s+|\bvar\s+|\bfinal\s+\w[\w<>\[\], ]*\s+|\b(?:String|var)\s+){name}\b\s*(?::[^=]+)?=(?!=)\s*(.*)$")
+        # let/const/var/final 선언 + Python·Go 의 맨 대입문(NAME = ..., NAME := ...)
+        pat = re.compile(rf"(?:\blet\s+(?:mut\s+)?|\bconst\s+|\bvar\s+|\bfinal\s+\w[\w<>\[\], ]*\s+|\b(?:String|var)\s+|^\s*){name}\b\s*(?::(?!=)[^=]+)?:?=(?!=)\s*(.*)$")
         for ln in range(scope.line - 1, scope.func_start - 1, -1):
             if ln < 1:
                 break
@@ -558,7 +559,8 @@ class Resolver:
             rf"(?:\b(?:pub(?:\([^)]*\))?\s+)?(?:const|static)\s+{name}\s*:[^=]+="
             rf"|\b(?:public|private|protected)?\s*static\s+final\s+\w+\s+{name}\s*="
             rf"|\b(?:export\s+)?const\s+{name}\s*(?::[^=]+)?="
-            rf"|\blet\s+(?:mut\s+)?{name}\s*(?::[^=]+)?=)\s*(.*)$"
+            rf"|\blet\s+(?:mut\s+)?{name}\s*(?::[^=]+)?="
+            rf"|^{name}\s*(?::[^=]+)?=(?!=))\s*(.*)$"  # 모듈 최상위 맨 대입 (Python 상수 등)
         )
         hits = []
         files = ([prefer] if prefer else []) + [f for f in self.files if f != prefer]

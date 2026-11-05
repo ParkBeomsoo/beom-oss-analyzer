@@ -6,6 +6,9 @@
 """
 from __future__ import annotations
 
+import hashlib
+import shutil
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -30,24 +33,61 @@ def _primary_language(conn, language: str | None) -> str:
     raise ToolError("capability_unavailable", "데이터 흐름을 지원하는 언어의 코드가 없음")
 
 
-def cpg_path(settings: Settings, project: dict, language: str) -> Path:
-    return workspace(settings, project["id"]) / "cpg" / f"{language}.bin"
+# 데이터 흐름 대상에서 빼는 범주 — 테스트·테스트 데이터·외부 코드는 CPG 를 키우기만 하고 질의 대상이 아님
+EXCLUDED_CATEGORIES = ("test", "test-data", "vendored", "generated", "doc", "asset", "secret", "binary", "unclassified")
 
 
-def build(conn, settings: Settings, project: dict, language: str | None = None, rebuild: bool = False) -> dict:
+def selection(conn, scope: list[str] | None = None) -> tuple[list[str], int]:
+    """CPG 에 넣을 파일 (포함 목록, 제외 수). scope 를 주면 그 경로 접두 밖도 뺀다."""
+    prefixes = [s.strip("/").replace("\\", "/") + "/" for s in scope or []]
+    keep, dropped = [], 0
+    for r in conn.execute("SELECT path, category FROM file ORDER BY path").fetchall():
+        if r["category"] in EXCLUDED_CATEGORIES or (prefixes and not any(r["path"].startswith(p) for p in prefixes)):
+            dropped += 1
+        else:
+            keep.append(r["path"])
+    return keep, dropped
+
+
+def cpg_path(settings: Settings, project: dict, language: str, key: str = "") -> Path:
+    return workspace(settings, project["id"]) / "cpg" / f"{language}{'-' + key if key else ''}.bin"
+
+
+def build(conn, settings: Settings, project: dict, language: str | None = None, rebuild: bool = False,
+          scope: list[str] | None = None) -> dict:
+    """제외할 파일이 있으면 포함 파일만 복사한 트리(내용·줄 번호 동일)를 만들어 그걸 파싱한다.
+
+    joern-parse 의 --exclude-regex 는 Windows 에서 .bat 을 두 번 거치며 | , = 가 깨진다 (fixture 검증에서 실제 발생).
+    복사본은 CPG 와 함께 보관한다 — 결과 경로를 저장소 상대 경로로 되돌릴 때 기준이 된다.
+    """
     lang = _primary_language(conn, language)
-    out = cpg_path(settings, project, lang)
-    if out.exists() and not rebuild:
-        return {"language": lang, "cpg": str(out), "cached": True}
-    Joern(settings.home).build_cpg(Path(project["repo_dir"]), lang, out)
-    return {"language": lang, "cpg": str(out), "cached": False}
+    keep, dropped = selection(conn, scope)
+    repo = Path(project["repo_dir"])
+    key = hashlib.sha256("\n".join(keep).encode()).hexdigest()[:10] if dropped else ""
+    out = cpg_path(settings, project, lang, key)
+    source = out.parent / f"src-{key}" if key else repo
+    info = {"language": lang, "cpg": str(out), "source_root": str(source), "files": len(keep), "excluded_files": dropped,
+            "scope": scope or None}
+    if out.exists() and source.exists() and not rebuild:
+        return {**info, "cached": True}
+    if key:
+        if source.exists():
+            shutil.rmtree(source)
+        for rel in keep:
+            dst = source / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(repo / rel, dst)
+    started = time.monotonic()
+    Joern(settings.home).build_cpg(source, lang, out)
+    return {**info, "cached": False, "seconds": round(time.monotonic() - started, 1)}
 
 
-def query(conn, settings: Settings, project: dict, queries: list[dict], language: str | None = None) -> dict:
+def query(conn, settings: Settings, project: dict, queries: list[dict], language: str | None = None,
+          scope: list[str] | None = None) -> dict:
     lang = _primary_language(conn, language)
-    built = build(conn, settings, project, lang)
+    built = build(conn, settings, project, lang, scope=scope)
     raw = Joern(settings.home).run_queries(Path(built["cpg"]), queries)
-    repo = Path(project["repo_dir"]).resolve().as_posix().lower()
+    repo = Path(built["source_root"]).resolve().as_posix().lower()
     results = []
     for item in raw:
         q = item["query"]

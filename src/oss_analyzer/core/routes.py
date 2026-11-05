@@ -12,7 +12,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from oss_analyzer.core import evidence, ledger, routetable, unknowns
+from oss_analyzer.core import evidence, ledger, mounts, routetable, unknowns
 from oss_analyzer.core.levels import L0, L3
 from oss_analyzer.core.resolve import Resolver, Scope, Unresolved, balanced, literal, normalize_path, split_top
 
@@ -85,13 +85,43 @@ def post_process(conn, project: dict, files: list[dict]) -> dict:
         _spring(conn, project, repo, stats)
         _dynamic(conn, project, repo, functions, code_files, stats)
         _mounts(conn, functions, stats)
+        _router_mounts(conn, project, repo, functions, code_files, stats)
         # 남은 리터럴 경로는 정규화만
         for f in conn.execute("SELECT id, name, handler, method FROM feature WHERE full_path IS NULL AND kind IN ('http','http-mount')").fetchall():
             lit = literal(f["name"].lstrip("&").strip())
             full = normalize_path(lit) if lit is not None else None
             method = f["method"] or ",".join(_methods_from_handler(f["handler"])) or None
             conn.execute("UPDATE feature SET full_path = ?, method = ? WHERE id = ?", (full, method, f["id"]))
+        # 숨은 빈틈 방지: 경로·메서드를 못 정한 HTTP 진입점은 조용히 빠지지 않고 미확인으로
+        for f in conn.execute("SELECT * FROM feature WHERE kind = 'http' AND in_test = 0 AND (full_path IS NULL OR method IS NULL)").fetchall():
+            missing = [x for x, v in (("경로", f["full_path"]), ("HTTP 메서드", f["method"])) if v is None]
+            unknowns.record(conn, question=f"{f['path']}:{f['start_line']} 진입점의 {'·'.join(missing)}를 정하지 못함 ({f['name'][:60]})",
+                            domain="entrypoint", scope=f"route-incomplete:{f['path']}:{f['start_line']}", severity="medium",
+                            required_level=L0, origin="resolver")
+            stats["incomplete"] = stats.get("incomplete", 0) + 1
     return stats
+
+
+def _router_mounts(conn, project: dict, repo: Path, functions, code_files: list[str], stats: dict) -> None:
+    """라우터 변수(receiver) 기반 접두 조합 — FastAPI include_router, Express app.use, Gin Group (mounts.py)."""
+    rows = conn.execute("SELECT * FROM feature WHERE kind = 'http' AND in_test = 0 AND receiver IS NOT NULL").fetchall()
+    if not rows:
+        return
+    langs = {".py", ".js", ".ts", ".mjs", ".cjs", ".tsx", ".jsx", ".go"}
+    sources = {p: "\n".join(evidence.read_lines(project, p)) for p in code_files if Path(p).suffix in langs}
+    resolver = Resolver(repo, "", functions, _callers_factory(conn), code_files)
+    mr = mounts.build(resolver, sources)
+    for f in rows:
+        path_lit = literal(f["name"].lstrip("&").strip())
+        if path_lit is None:
+            continue  # 동적 경로는 _dynamic 이 처리하거나 미확인으로 남음
+        prefixes, notes = mr.prefixes(f["path"], f["receiver"])
+        fulls = sorted({normalize_path("/" + p + "/" + path_lit) if p else normalize_path(path_lit if path_lit.startswith("/") else "/" + path_lit)
+                        for p in prefixes})
+        assumptions = notes + ([f"여러 마운트 경로: {', '.join(fulls)}"] if len(fulls) > 1 else [])
+        conn.execute("UPDATE feature SET full_path = ?, assumptions = ? WHERE id = ?",
+                     (fulls[0], ledger.dumps(assumptions), f["id"]))
+        stats["router_mounted"] = stats.get("router_mounted", 0) + 1
 
 
 def _route_tables(conn, project: dict, repo: Path, stats: dict) -> None:

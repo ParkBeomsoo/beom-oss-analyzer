@@ -148,12 +148,128 @@ MIGRATIONS: list[str] = [
     ALTER TABLE feature ADD COLUMN assumptions TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE feature ADD COLUMN derived_from TEXT;
     """,
+    # v4 — 라우트를 등록한 라우터 객체(변수) 이름: 마운트 조합에 사용
+    """
+    ALTER TABLE feature ADD COLUMN receiver TEXT;
+    """,
+    # v5 — 확장 포인트 + 커스텀 원장 보강 (상태·앵커로 업스트림 변경 감지)
+    """
+    CREATE TABLE extension_point (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        language TEXT,
+        path TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        symbol_id TEXT,
+        implementations TEXT NOT NULL DEFAULT '[]',
+        usages TEXT NOT NULL DEFAULT '[]',
+        note TEXT,
+        evidence_id TEXT
+    );
+    CREATE INDEX extension_point_path ON extension_point(path);
+    ALTER TABLE customization ADD COLUMN kind TEXT NOT NULL DEFAULT 'modify';
+    ALTER TABLE customization ADD COLUMN status TEXT NOT NULL DEFAULT 'planned';
+    ALTER TABLE customization ADD COLUMN author TEXT;
+    ALTER TABLE customization ADD COLUMN extension_point_id TEXT;
+    ALTER TABLE customization ADD COLUMN anchors TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE customization ADD COLUMN commit_sha TEXT;
+    ALTER TABLE customization ADD COLUMN history TEXT NOT NULL DEFAULT '[]';
+    """,
+    # v6 — 실행 검증(L3) 커버리지
+    """
+    CREATE TABLE coverage_run (
+        id TEXT PRIMARY KEY,
+        tool TEXT NOT NULL,
+        format TEXT NOT NULL,
+        commit_sha TEXT NOT NULL,
+        command TEXT,
+        report_path TEXT,
+        files_matched INTEGER NOT NULL,
+        files_unmatched INTEGER NOT NULL,
+        symbols_hit INTEGER NOT NULL,
+        symbols_missed INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE coverage_hit (
+        run_id TEXT NOT NULL,
+        symbol_id TEXT NOT NULL,
+        evidence_id TEXT,
+        lines_hit INTEGER NOT NULL,
+        lines_measured INTEGER NOT NULL
+    );
+    CREATE INDEX coverage_hit_symbol ON coverage_hit(symbol_id);
+    CREATE TABLE license_finding (
+        path TEXT NOT NULL,
+        license TEXT NOT NULL,
+        category TEXT NOT NULL,
+        source TEXT NOT NULL,
+        line INTEGER NOT NULL,
+        scope TEXT NOT NULL,
+        evidence_id TEXT
+    );
+    """,
+    # v7 — 포팅 원장 (내 저장소로 옮기기·다른 언어로 다시 만들기)
+    """
+    CREATE TABLE port (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        targets TEXT NOT NULL,
+        target_language TEXT NOT NULL,
+        target_root TEXT NOT NULL,
+        slice TEXT NOT NULL,
+        author TEXT,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE port_map (
+        port_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        label TEXT NOT NULL,
+        status TEXT NOT NULL,
+        target_ref TEXT,
+        note TEXT,
+        actor TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (port_id, item_id)
+    );
+    CREATE TABLE port_check (
+        id TEXT PRIMARY KEY,
+        port_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        cases INTEGER NOT NULL,
+        passed INTEGER NOT NULL,
+        failed INTEGER NOT NULL,
+        detail TEXT NOT NULL,
+        evidence_id TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
+    # v8: ported 대상 줄 내용 — 대상 저장소가 바뀌어 줄이 밀리거나 내용이 바뀐 것을 잡는다
+    """
+    ALTER TABLE port_map ADD COLUMN target_text TEXT;
+    """,
+    # v9: 포팅 기록 해시 사슬 — 사람 승인, 툴킷 밖 수정 탐지 (core/port_guard.py)
+    """
+    CREATE TABLE port_log (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        port_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        at TEXT NOT NULL,
+        prev TEXT NOT NULL,
+        hash TEXT NOT NULL
+    );
+    CREATE INDEX port_log_port ON port_log (port_id, seq);
+    ALTER TABLE port ADD COLUMN log_head TEXT;
+    """,
 ]
 
 JSON_COLUMNS = {
     "capabilities", "members", "parameters", "result", "locations", "limitations",
     "evidence_ids", "symbol_ids", "unit_ids", "supporting_evidence_ids",
     "contradicting_evidence_ids", "recommended_probes", "resolution", "history", "assumptions",
+    "implementations", "usages", "anchors", "targets", "slice", "detail",
 }
 
 

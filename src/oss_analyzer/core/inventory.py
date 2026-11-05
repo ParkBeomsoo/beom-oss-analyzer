@@ -18,12 +18,15 @@ from oss_analyzer.adapters.cbm import CodebaseMemory
 from oss_analyzer.adapters.lsp import language_available
 from oss_analyzer.common.response import ToolError
 from oss_analyzer.config import Settings
-from oss_analyzer.core import evidence, ledger, mybatis, nextjs, routes, unknowns
+from oss_analyzer.core import evidence, extpoints, ledger, mybatis, nextjs, routes, unknowns
+from oss_analyzer.core import license as license_mod
 from oss_analyzer.core.classify import ANALYZED_CATEGORIES, classify
 from oss_analyzer.core.levels import L0, L1, LEVEL_NAMES, ceiling_for
 from oss_analyzer.core.units import build_units, unit_for_symbol
 
-NATIVE_BINARY_EXT = {".so", ".dll", ".dylib", ".exe", ".jar", ".war", ".class", ".wasm", ".a", ".lib", ".o", ".obj", ".node"}
+PY_DECORATOR_RE = re.compile(
+    r"""^@(\w+)\.(get|post|put|delete|patch|head|options|route|api_route|websocket)\s*\(\s*((?:[rbuf]?)(?:"[^"]*"|'[^']*'))?""", re.I)
+NATIVE_BINARY_EXT ={".so", ".dll", ".dylib", ".exe", ".jar", ".war", ".class", ".wasm", ".a", ".lib", ".o", ".obj", ".node"}
 
 
 def _read_meta(repo: Path, path: str) -> tuple[bool, int, str, int]:
@@ -173,6 +176,8 @@ def build(conn, settings: Settings, project: dict, rebuild: bool = False) -> dic
     feature_stats = _entrypoints(conn, settings, project, files)
     feature_stats["nextjs"] = _nextjs(conn, project, files)
     feature_stats["routes"] = routes.post_process(conn, project, files)
+    feature_stats["extension_points"] = extpoints.build(conn, project, files)
+    feature_stats["license"] = {k: v for k, v in license_mod.scan(conn, project).items() if k != "note"}
 
     with ledger.tx(conn):
         conn.execute("UPDATE project SET inventory_at = ?, capabilities = ?",
@@ -296,6 +301,20 @@ def _entrypoints(conn, settings: Settings, project: dict, files: list[dict]) -> 
                 am = re.match(r'^#\[(?:actix_web::)?(\w+)\s*\(\s*"([^"]*)"', m["text"])
                 if am:
                     name = f'"{am.group(2)}"'
+            method = (m["vars"].get(meta.get("method", ""), {}).get("text") or "").upper() or None
+            receiver = m["vars"].get(meta.get("receiver", ""), {}).get("text")
+            if meta.get("extract") == "py_decorator":
+                dm = PY_DECORATOR_RE.match(m["text"])
+                if dm:
+                    receiver, verb, path_lit = dm.group(1), dm.group(2).lower(), dm.group(3)
+                    name = path_lit or name
+                    if verb in ("route", "api_route"):
+                        methods = re.findall(r"""["'](GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)["']""", m["text"], re.I)
+                        method = ",".join(sorted({x.upper() for x in methods})) or "GET"  # Flask 기본 GET
+                    elif verb == "websocket":
+                        method = "WS"
+                    else:
+                        method = verb.upper()
             handler = m["vars"].get(meta.get("handler", ""), {}).get("text") or m["multi"].get(meta.get("handler", ""))
             loc = {"path": m["path"], "start_line": line, "end_line": line}
             ev = evidence.record(conn, project, provider="astgrep", operation=f"rule:{m['rule_id']}",
@@ -311,7 +330,9 @@ def _entrypoints(conn, settings: Settings, project: dict, files: list[dict]) -> 
                 (fid, meta["kind"], name, meta["framework"], m["path"], line, line_end, handler, ev["evidence_id"], int(testy)),
             )
             if meta.get("extract") == "attr_path":
-                conn.execute("UPDATE feature SET method = ? WHERE id = ?", (m["text"].split("(")[0].split("::")[-1].lstrip("#[").upper(), fid))
+                method = m["text"].split("(")[0].split("::")[-1].lstrip("#[").upper()
+            if method or receiver:
+                conn.execute("UPDATE feature SET method = COALESCE(?, method), receiver = ? WHERE id = ?", (method, receiver, fid))
             count += 1
             if testy:
                 test_count += 1

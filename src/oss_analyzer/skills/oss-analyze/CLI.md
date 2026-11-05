@@ -6,8 +6,11 @@ MCP 도구와 같은 기능을 CLI 로 쓴다. 절차·판단 규칙은 SKILL.md
 Windows 에서 출력을 파이썬으로 읽을 때는 `encoding="utf-8"` (또는 `python -X utf8`).
 
 ```
-OA=<설치 경로>/.venv/Scripts/oss-analyzer.exe   # Linux/macOS: <설치 경로>/.venv/bin/oss-analyzer
+OA=oss-analyzer   # PATH 의 명령 (설치 위치는 사람마다 다르다 — 경로를 짐작하거나 적어 두지 않는다)
 ```
+
+명령이 없으면 사용자에게 설치를 요청한다 (README 의 설치). `oss-analyzer doctor` 의 `integration` 에
+CLI·스킬·MCP 등록 상태가 나온다.
 
 ## 루프
 
@@ -78,3 +81,41 @@ $OA complete <pid> <unit_id> --agent <내 id> --summary "<단위 요약>"
 - 호출 관계를 중요 결론으로 쓰면 lsp 근거로, 값이 어디로 흘러가는지(권한·금액·삭제 조건)는 dataflow 근거로.
 - 확신 없는 것, 동적 동작, 설정·환경 의존, 외부 라이브러리 의존 → unknown-add.
 - 분석 대상 코드를 빌드·실행하지 않는다. `.env*` 를 읽지 않는다.
+
+## 커스텀·실행 검증·라이선스
+
+```bash
+oss-analyzer extpoints <pid> [--kind interface|registry|middleware|config-key]
+oss-analyzer impact <pid> <대상...> [--verify] [--depth 4] [--no-name-match]   # 대상: s_id / 경로:줄 / 파일 / 이름
+oss-analyzer custom-add <pid> --description "..." --kind extend|modify|replace|config|remove [--targets ...] [--extension-point xp_...]
+oss-analyzer custom-list <pid> [--status planned|applied|dropped]
+oss-analyzer custom-update <pid> <cus_id> --status applied --note "..."
+oss-analyzer compare <기준 pid> <새 pid> [--save]
+oss-analyzer runtime-ingest <pid> <리포트> [--root <실행 디렉터리>]
+oss-analyzer runtime-run <pid> --report coverage.json --command "..." (--image <docker 이미지> | --trusted)
+oss-analyzer license <pid>
+oss-analyzer setup [--languages ...] [--apply <id...>]
+```
+
+## 포팅
+
+```bash
+oss-analyzer slice <pid> "POST /api/v1/orders" [심볼...]
+oss-analyzer port-create <pid> --name ... --targets ... --language <대상 언어> --target-root <내 저장소>
+oss-analyzer port-map <pid> <port_id> --json map.json      # [{item, status, target?, note?}]
+oss-analyzer port-map <pid> <port_id> --follow             # 줄이 밀린 ported 대상 갱신
+oss-analyzer port-capture <pid> <port_id> --cases cases.json (--source-url U [--source-cmd C] | --source-cli C) (--source-image I | --trusted) \
+    [--explore N] [--coverage-cmd C --coverage-report 경로]
+oss-analyzer port-verify <pid> <port_id> (--target-url U [--target-cmd C] | --target-cli C) [--concurrency N] [--cases ... --source-* 로 실시간] \
+    [--target-coverage-cmd C --target-coverage-report 경로]   # 원본 계측이 안 될 때 대상 커버리지로 케이스 충분성
+oss-analyzer port-accept <pid> <port_id> --case <이름 패턴*> --reason "..."   # 제안 — 사용자 승인 필요
+oss-analyzer port-status <pid> [<port_id>]                   # gates · next_step · approvals · finished
+oss-analyzer port-approve <pid> <port_id> [--list]          # 사용자가 터미널에서 직접 (파이프 실행은 human_required 로 거부)
+oss-analyzer port-finish <pid> <port_id>                    # 게이트 전부 충족 시에만 판정 발급, 아니면 gates_unmet + next_step
+```
+
+에이전트는 `port-approve` 를 실행하지 않는다 (`--list` 로 대기 목록 보기만). 승인은 사람이 MCP 확인 창이나 터미널에서 직접.
+
+케이스 JSON: `{"defaults": {...}, "cases": [{"name", "method", "path", "json"?, "headers"?, "ignore"?: [점 경로], "match"?: {점 경로: 정규식}, "compare"?: "full"|"status"} | {"name", "argv", "stdin"?} | {"name", "call": {"source": "app/x.py:fn", "target": "src/x.js:fn" 또는 {"cmd": "..."}}, "args"?, "kwargs"?, "runtime"?: {"source": "python 경로", "target": "node"}}]}`.
+케이스에 `"explore": false` 면 변형 대상에서 빼고, `"concurrent": false` 면 동시 요청에서 뺀다. `match` 경로는 양쪽 다 없으면 같다고 본다(오류 응답).
+앞 케이스 결과는 `{{이름.필드}}` 로 참조 (예: 생성한 주문 id 로 조회).

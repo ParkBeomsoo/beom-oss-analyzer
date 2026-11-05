@@ -25,7 +25,10 @@
 | jedi-language-server | MIT | Python LSP |
 | typescript-language-server | MIT | TS/JS LSP |
 | jdtls | EPL-2.0 | Java LSP (외부 프로세스로만) |
-| Joern (2단계) | Apache-2.0 | 데이터 흐름 |
-| ScanCode (3단계) | Apache-2.0, 데이터 CC-BY-4.0 | 라이선스 스캔 |
+| Joern | Apache-2.0 | 데이터 흐름 |
+| coverage.py | Apache-2.0 | Python 실행 검증(L3), `setup` 으로 설치 |
+| ScanCode (선택) | Apache-2.0, 데이터 CC-BY-4.0 | 정밀 라이선스 스캔 — 내장 스캐너로 부족할 때만 별도 설치 |
+| Docker Engine (Moby, Debian `docker.io`) | Apache-2.0 | 남의 코드 격리 실행 — Windows 는 WSL 배포판 `oss-sandbox` 안에서 (`setup --apply sandbox`). Docker Desktop 은 쓰지 않아도 됨 (일정 규모 이상 회사의 업무 사용은 유료 구독 조건) |
+| WSL Debian 배포판 | 구성 패키지별 자유 소프트웨어 라이선스 | 위 Docker Engine 의 실행 환경 (외부, 사용자 PC 에 설치) |
 
 multilspy 의 PHP 기본 서버(Intelephense)는 비공개 상용이라 사용하지 않는다.

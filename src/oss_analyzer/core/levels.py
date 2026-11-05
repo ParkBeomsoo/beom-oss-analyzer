@@ -17,9 +17,11 @@ PROVIDER_LEVEL = {
     "astgrep": L0,
     "convention": L0,  # 프레임워크 규약 (Next.js 파일 기반 라우팅 등)
     "resolver": L0,    # 동적 값 정적 해석
+    "pattern": L0,     # 정규식 패턴 탐지 (확장 포인트·라이선스 문구 등)
     "lsp": L1,
     "joern": L2,
     "coverage": L3,
+    "differential": L3,  # 포팅 차등 검증 (원본·대상에 같은 입력 → 같은 결과)
 }
 
 # multilspy 가 지원하는 언어 중 우리가 허용한 것 (PHP 기본 서버 Intelephense 는 비공개 상용이라 제외)

@@ -10,6 +10,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from contextlib import ExitStack
@@ -37,6 +38,17 @@ REQUIRED_BINARY = {
     "c": "clangd",
     "python": None,  # jedi-language-server 는 multilspy 의존성으로 함께 설치됨
 }
+
+
+def _ensure_interpreter_scripts_on_path() -> None:
+    """venv 를 활성화하지 않고 `.venv/Scripts/python -m ...` 로 실행해도 같은 venv 의 jedi-language-server 를 찾도록.
+
+    multilspy 는 서버를 실행 파일 이름으로 띄우므로 PATH 에 없으면 WinError 2 로 실패한다 (fixture 검증에서 실제 발생).
+    """
+    scripts = str(Path(sys.executable).parent)
+    parts = os.environ.get("PATH", "").split(os.pathsep)
+    if scripts not in parts:
+        os.environ["PATH"] = os.pathsep.join([scripts, *parts])
 
 
 def _rust_toolchain() -> tuple[str | None, str | None]:
@@ -73,6 +85,10 @@ def language_available(language: str) -> tuple[bool, str]:
         return False, "multilspy 미설치"
     if language == "rust":
         return (True, "system rust-analyzer") if _system_rust_analyzer() else (False, "rustup component add rust-analyzer 필요")
+    if language == "python":
+        _ensure_interpreter_scripts_on_path()
+        if not shutil.which("jedi-language-server"):
+            return False, "jedi-language-server 가 PATH·현재 venv 에 없음 (pip install jedi-language-server)"
     binary = REQUIRED_BINARY.get(language)
     if binary and not shutil.which(binary):
         return False, f"{binary} 가 PATH 에 없음"
@@ -184,6 +200,8 @@ class _Server:
             _preflight([path or "rust-analyzer", "--version"], repo, "rust-analyzer")
         if language in ("typescript", "javascript"):
             _patch_typescript()
+        if language == "python":
+            _ensure_interpreter_scripts_on_path()
         config = MultilspyConfig.from_dict({"code_language": MULTILSPY_LANGUAGE.get(language, language)})
         self.timeout = timeout
         self.lsp = SyncLanguageServer.create(config, MultilspyLogger(), str(repo), timeout=timeout)

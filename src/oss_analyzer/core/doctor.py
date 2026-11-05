@@ -9,6 +9,7 @@ from oss_analyzer.adapters.astgrep import AstGrep
 from oss_analyzer.adapters.cbm import CodebaseMemory
 from oss_analyzer.adapters.lsp import language_available
 from oss_analyzer.config import Settings
+from oss_analyzer.core import container, runtime
 from oss_analyzer.core.levels import LSP_LANGUAGES
 
 INSTALL_HINTS = {
@@ -27,7 +28,7 @@ INSTALL_HINTS = {
     "lsp:dart": "Dart SDK 설치",
     "lsp:cpp": "clangd 설치 (LLVM)",
     "lsp:c": "clangd 설치 (LLVM)",
-    "docker": "격리 실행(3단계 L3)에 필요 — Docker Desktop 또는 WSL2",
+    "docker": "격리 실행에 필요 — setup --apply sandbox (WSL 에 Docker Engine, Apache-2.0) 또는 네이티브 docker",
     "joern": "https://github.com/joernio/joern/releases 의 joern-cli-<os>.zip (sha512 검증) → <home>/engines/joern-cli, JDK 21+",
 }
 
@@ -41,6 +42,16 @@ def _version(cmd: list[str]) -> str | None:
         return None
     text = (proc.stdout or proc.stderr).decode("utf-8", "replace").strip().splitlines()
     return text[0] if text and proc.returncode == 0 else None
+
+
+def _integration() -> dict:
+    from oss_analyzer.core import integration
+
+    st = integration.status()
+    todo = [k for k in ("skill", "mcp") if st[k]["state"] in ("missing", "outdated")]
+    if todo:
+        st["fix"] = "oss-analyzer setup --apply " + " ".join("skill" if k == "skill" else "mcp-register" for k in todo)
+    return st
 
 
 def run(settings: Settings, languages: list[str] | None = None) -> dict:
@@ -71,7 +82,12 @@ def run(settings: Settings, languages: list[str] | None = None) -> dict:
         "required_missing": missing,
         "ready": not missing,
         "install_hints": hints,
-        "not_yet": {"coverage": "3단계 (L3 실행 검증)", "scancode": "3단계 (라이선스)"},
+        "integration": _integration(),
+        "runtime": {"docker_daemon": runtime.docker_available(),
+                    "container_engine": (lambda e: e.label if e else None)(container.detect()),
+                    "note": "L3: 커버리지 리포트 적재(runtime-ingest)는 항상 가능. 직접 실행(runtime-run)은 Docker 데몬이 있으면 "
+                            "네트워크 차단 컨테이너, 없으면 trusted 저장소만 로컬 임시 사본에서"},
+        "license": "내장 스캐너(SPDX 헤더·라이선스 문구·매니페스트). 의존성 라이선스·정밀 텍스트 비교가 필요하면 ScanCode 를 별도 설치",
         "notes": {"joern": "L2 데이터 흐름. JDK 21+ 필요(OSS_ANALYZER_JAVA_HOME 또는 ~/.jdks 자동 탐색). "
                            "저장소마다 처음 CPG 생성이 오래 걸림(1만 줄 Java 약 15분) — dataflow --build-only 로 미리 생성"},
     }

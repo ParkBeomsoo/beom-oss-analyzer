@@ -55,3 +55,13 @@ def oss_repo_close(project_id: str) -> dict:
     lsp_pool.close_repo(Path(proj["repo_dir"]))
     project.close(project_id)
     return {"closed": project_id}
+
+
+@mcp.tool()
+@enveloped("session.setup_plan")
+def oss_setup_plan(languages: list[str] | None = None) -> dict:
+    """엔진 설치 계획 — 구성 요소별 상태·라이선스·출처·설치 명령. 아무것도 설치하지 않는다.
+    설치는 사용자가 터미널에서 `oss-analyzer setup --apply <id...>` 로 직접 승인해 실행한다 (체크섬 검증)."""
+    from oss_analyzer.core import setup
+
+    return setup.plan(settings, languages)

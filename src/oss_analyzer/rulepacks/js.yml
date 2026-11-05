@@ -7,6 +7,8 @@ packs:
         language: javascript
         name: PATH
         handler: ARGS
+        method: M
+        receiver: APP
         rule:
           pattern: "$APP.$M($PATH, $$$ARGS)"
         constraints:
@@ -17,6 +19,8 @@ packs:
         language: typescript
         name: PATH
         handler: ARGS
+        method: M
+        receiver: APP
         rule:
           pattern: "$APP.$M($PATH, $$$ARGS)"
         constraints:

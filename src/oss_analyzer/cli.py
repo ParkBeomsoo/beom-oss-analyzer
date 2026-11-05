@@ -14,7 +14,9 @@ from typing import Any
 from oss_analyzer.adapters.lsp import LspPool, ProcessLock
 from oss_analyzer.common.response import Envelope, ToolError
 from oss_analyzer.config import load_settings
-from oss_analyzer.core import doctor, engines, inventory, ledger, loop, project, report, unknowns
+from oss_analyzer.core import customize, doctor, engines, extpoints, inventory, ledger, loop, port, project, report, runtime, unknowns
+from oss_analyzer.core import port_guard
+from oss_analyzer.core import license as license_mod
 
 
 def _print(data: object) -> None:
@@ -39,6 +41,10 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--ref")
     p.add_argument("--name")
     sub.add_parser("list", help="프로젝트 목록")
+    p = sub.add_parser("setup", help="엔진 설치 계획(기본) / --apply 로 고른 것만 설치")
+    p.add_argument("--languages", nargs="*")
+    p.add_argument("--apply", nargs="+", metavar="ID", help="plan 의 components[].id (체크섬 검증 후 설치)")
+    p.add_argument("--remove", nargs="+", metavar="ID", help="되돌리기: skill, mcp-register (이 툴킷이 설치한 것만)")
 
     for name, help_ in (("coverage", "커버리지"), ("features", "기능 카탈로그"), ("unknowns", "열린 미확인"),
                         ("units", "단위 목록"), ("export", "리포트 내보내기"), ("pending", "독립 검토 대기 결론")):
@@ -72,6 +78,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--json")
     p.add_argument("--language")
     p.add_argument("--build-only", action="store_true", help="CPG 만 만든다 (처음 한 번 오래 걸림)")
+    p.add_argument("--scope", nargs="+", help="이 경로 접두 아래 코드만 CPG 로 (테스트·외부 코드는 항상 제외)")
+    p.add_argument("--rebuild", action="store_true")
     p = sub.add_parser("finding", help="결론 기록 (--json: {text, severity, evidence, symbol_ids} 또는 그 배열)")
     p.add_argument("project_id")
     p.add_argument("unit_id")
@@ -110,6 +118,113 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--reviewer", required=True)
     p.add_argument("--verdict", required=True, choices=["confirmed", "rejected"])
     p.add_argument("--note", required=True)
+    p = sub.add_parser("impact", help="영향도: 대상(심볼 id·경로:줄·파일·이름)을 바꾸면 영향받는 곳")
+    p.add_argument("project_id")
+    p.add_argument("targets", nargs="+")
+    p.add_argument("--depth", type=int, default=4)
+    p.add_argument("--verify", action="store_true", help="LSP incoming 으로 대조 (L1 근거 기록, 누락 호출자 보탬)")
+    p.add_argument("--no-name-match", action="store_true", help="이름 일치 후보 생략")
+    p = sub.add_parser("extpoints", help="확장 포인트 목록")
+    p.add_argument("project_id")
+    p.add_argument("--kind")
+    p.add_argument("--path")
+    p = sub.add_parser("custom-add", help="커스텀 기록 (대상 심볼 앵커 저장 + 영향도 요약)")
+    p.add_argument("project_id")
+    p.add_argument("--description", required=True)
+    p.add_argument("--kind", default="modify", choices=sorted(customize.KINDS))
+    p.add_argument("--extension-point")
+    p.add_argument("--agent", default="cli")
+    p.add_argument("--targets", nargs="+", default=[], help="심볼 id·경로:줄·파일·이름 (확장 포인트만 쓸 때는 생략)")
+    p = sub.add_parser("custom-list", help="커스텀 원장")
+    p.add_argument("project_id")
+    p.add_argument("--status")
+    p = sub.add_parser("custom-update", help="커스텀 상태 변경")
+    p.add_argument("project_id")
+    p.add_argument("customization_id")
+    p.add_argument("--status", required=True, choices=sorted(customize.STATUSES))
+    p.add_argument("--note", required=True)
+    p.add_argument("--agent", default="cli")
+    p = sub.add_parser("compare", help="버전 비교 (base=우리 기준 버전, head=업스트림 새 버전)")
+    p.add_argument("base_project_id")
+    p.add_argument("head_project_id")
+    p.add_argument("--limit", type=int, default=300)
+    p.add_argument("--save", action="store_true", help="head 작업 공간 reports/ 에 JSON 저장")
+    p = sub.add_parser("runtime-ingest", help="커버리지 리포트 → 심볼 단위 L3 근거")
+    p.add_argument("project_id")
+    p.add_argument("report")
+    p.add_argument("--root", nargs="*", default=[], help="리포트 절대 경로에서 잘라낼 실행 디렉터리")
+    p.add_argument("--tool")
+    p = sub.add_parser("runtime-run", help="저장소 사본에서 명령 실행 후 커버리지 적재 (Docker, 없으면 --trusted 만)")
+    p.add_argument("project_id")
+    p.add_argument("--command", required=True)
+    p.add_argument("--report", required=True, help="명령이 만드는 리포트 경로 (사본 루트 기준)")
+    p.add_argument("--trusted", action="store_true", help="Docker 없이 로컬 실행 허용 (신뢰하는 저장소만)")
+    p.add_argument("--image")
+    p.add_argument("--network", action="store_true", help="컨테이너 네트워크 허용 (기본 차단)")
+    p.add_argument("--timeout", type=int, default=1800)
+    sub.add_parser("runtime-runs", help="적재한 커버리지 실행 목록").add_argument("project_id")
+    sub.add_parser("license", help="라이선스 스캔").add_argument("project_id")
+    p = sub.add_parser("slice", help="포팅 범위: 진입점('POST /api/x')·심볼에서 앞으로 닫힘 + 상태·등록·외부 의존·테스트·라이선스")
+    p.add_argument("project_id")
+    p.add_argument("targets", nargs="+")
+    p.add_argument("--within", nargs="+", help="포팅 경계(경로 접두). 밖으로 나가는 호출은 boundary(대체할 의존)로")
+    p.add_argument("--depth", type=int, default=10)
+    p = sub.add_parser("port-create", help="포팅 원장 생성 (슬라이스 항목마다 pending)")
+    p.add_argument("project_id")
+    p.add_argument("--name", required=True)
+    p.add_argument("--targets", nargs="+", required=True)
+    p.add_argument("--language", required=True, help="대상 언어")
+    p.add_argument("--target-root", required=True, help="대상(내) 저장소 경로")
+    p.add_argument("--within", nargs="+", help="포팅 경계(경로 접두)")
+    p.add_argument("--depth", type=int, default=10)
+    p.add_argument("--agent", default="cli")
+    p = sub.add_parser("port-map", help="항목 매핑 (--json: [{item, status: ported|omitted|replaced, target?: '경로:줄', note?}])")
+    p.add_argument("project_id")
+    p.add_argument("port_id")
+    p.add_argument("--json", help="매핑 파일")
+    p.add_argument("--follow", action="store_true", help="이동한 ported 대상을 새 줄로 갱신")
+    p.add_argument("--agent", default="cli")
+    p = sub.add_parser("port-accept", help="의도적인 동작 차이 허용 제안 (케이스 이름 패턴, * 가능) — 사용자 승인 전까지 게이트 미충족")
+    p.add_argument("project_id")
+    p.add_argument("port_id")
+    p.add_argument("--case", nargs="+", required=True)
+    p.add_argument("--reason", required=True)
+    p.add_argument("--agent", default="cli")
+    p = sub.add_parser("port-status", help="포팅 진행·게이트·다음 할 일")
+    p.add_argument("project_id")
+    p.add_argument("port_id", nargs="?")
+    p = sub.add_parser("port-approve", help="사람 확인 항목(차이 허용·생략·케이스 변경) 승인 — 사용자가 터미널에서 직접 실행")
+    p.add_argument("project_id")
+    p.add_argument("port_id")
+    p.add_argument("--list", action="store_true", help="승인 대기 목록만 보기 (누구나)")
+    p = sub.add_parser("port-finish", help="완료 판정 — 게이트가 모두 충족될 때만 발급")
+    p.add_argument("project_id")
+    p.add_argument("port_id")
+    p.add_argument("--agent", default="cli")
+    for name, help_ in (("port-capture", "원본에 케이스를 돌려 골든 저장"), ("port-verify", "대상(내 코드)을 원본과 차등 비교")):
+        p = sub.add_parser(name, help=help_)
+        p.add_argument("project_id")
+        p.add_argument("port_id")
+        p.add_argument("--cases", help="케이스 JSON ({defaults?, cases: [{name?, method, path, json?, ignore?, match?, compare?} "
+                                         "| {argv, stdin?} | {call: {source, target}, args?, kwargs?, runtime?}]})")
+        p.add_argument("--source-url")
+        p.add_argument("--source-cmd", help="원본 서버 기동 명령 (분석 clone 의 임시 사본에서, --trusted 필요)")
+        p.add_argument("--source-cli", help="원본 CLI 명령 (케이스 argv 를 뒤에 붙임)")
+        p.add_argument("--trusted", action="store_true")
+        p.add_argument("--source-image", help="원본을 이 Docker 이미지 안에서 실행 (격리, --trusted 불필요)")
+        p.add_argument("--explore", type=int, default=0, help="입력 변형 케이스를 최대 N개 추가 생성")
+        p.add_argument("--seed", type=int, default=0)
+        p.add_argument("--timeout", type=float, default=30)
+        if name == "port-capture":
+            p.add_argument("--coverage-cmd", help="원본 실행 후 커버리지 리포트를 만드는 명령 (원본 사본에서)")
+            p.add_argument("--coverage-report", help="원본 커버리지 리포트 경로 (사본 기준) → 케이스 충분성 게이트")
+        if name == "port-verify":
+            p.add_argument("--target-url")
+            p.add_argument("--target-cmd", help="대상 서버 기동 명령 (대상 저장소에서)")
+            p.add_argument("--target-cli")
+            p.add_argument("--concurrency", type=int, default=0, help="케이스마다 대상에 동시 요청 N개")
+            p.add_argument("--target-coverage-cmd", help="대상 실행 후 커버리지 리포트를 만드는 명령 (대상 저장소에서)")
+            p.add_argument("--target-coverage-report", help="대상 커버리지 리포트 경로 (대상 저장소 기준) → ported 대상 실행 여부")
     p = sub.add_parser("classify", help="파일 직접 분류")
     p.add_argument("project_id")
     p.add_argument("--category", required=True)
@@ -126,6 +241,19 @@ def _run(args: argparse.Namespace) -> Any:
         return project.open_repo(settings, args.source, args.ref, args.name)
     if args.cmd == "list":
         return {"projects": project.list_projects(settings)}
+    if args.cmd == "setup":
+        from oss_analyzer.core import setup
+
+        if args.apply:
+            return setup.apply(settings, args.apply, args.languages)
+        if args.remove:
+            return setup.remove(settings, args.remove)
+        return setup.plan(settings, args.languages)
+    if args.cmd == "compare":
+        out = customize.compare_versions(settings, args.base_project_id, args.head_project_id, args.limit)
+        if args.save:
+            out["saved_to"] = str(customize.workspace_report(settings, args.head_project_id, args.base_project_id, out))
+        return out
 
     conn, proj = project.load(settings, args.project_id)
     cmd = args.cmd
@@ -161,10 +289,10 @@ def _run(args: argparse.Namespace) -> Any:
         from oss_analyzer.core import dataflow
 
         if args.build_only:
-            return dataflow.build(conn, settings, proj, args.language)
+            return dataflow.build(conn, settings, proj, args.language, args.rebuild, args.scope)
         if not args.json:
             raise ToolError("invalid_request", "--json 질의 파일이 필요함 (또는 --build-only)")
-        return dataflow.query(conn, settings, proj, _as_list(_load_json(args.json)), args.language)
+        return dataflow.query(conn, settings, proj, _as_list(_load_json(args.json)), args.language, args.scope)
     if cmd == "finding":
         raw = _load_json(args.json)
         out = []
@@ -177,7 +305,9 @@ def _run(args: argparse.Namespace) -> Any:
             except ToolError as e:
                 out.append({"ok": False, "text": str(body.get("text", ""))[:80], "error": {"code": e.code, "message": e.message}})
         # 배열로 넣으면 항상 {"results": [...]}, 객체 하나면 그 결과 그대로
-        return {"results": out} if isinstance(raw, list) else out[0]
+        if isinstance(raw, list):  # 일부 실패를 ok:true 에 묻히지 않게 집계
+            return {"recorded": sum(1 for r in out if r["ok"]), "failed": sum(1 for r in out if not r["ok"]), "results": out}
+        return out[0]
     if cmd == "withdraw":
         return loop.withdraw_claim(conn, claim_id=args.claim_id, agent=args.agent, reason=args.reason)
     if cmd == "mark":
@@ -203,9 +333,93 @@ def _run(args: argparse.Namespace) -> Any:
             return unknowns.update(conn, uid, actor=args.agent, **body)
     if cmd == "review":
         return loop.review_claim(conn, claim_id=args.claim_id, reviewer=args.reviewer, verdict=args.verdict, note=args.note)
+    if cmd == "impact":
+        if not args.verify:
+            return customize.impact(conn, proj, args.targets, args.depth, name_match=not args.no_name_match)
+        pool = LspPool(settings.lsp_idle_seconds, settings.lsp_timeout_seconds)
+        try:
+            return customize.impact(conn, proj, args.targets, args.depth, True, pool, not args.no_name_match)
+        finally:
+            pool.close_repo(Path(proj["repo_dir"]))
+    if cmd == "extpoints":
+        return extpoints.list_(conn, args.kind, args.path, 0, 10000)
+    if cmd == "custom-add":
+        return customize.record(conn, proj, description=args.description, targets=args.targets, kind=args.kind,
+                                extension_point_id=args.extension_point, author=args.agent)
+    if cmd == "custom-list":
+        return customize.list_customizations(conn, args.status)
+    if cmd == "custom-update":
+        return customize.update_customization(conn, args.customization_id, status=args.status, note=args.note, actor=args.agent)
+    if cmd == "runtime-ingest":
+        return runtime.ingest(conn, proj, Path(args.report), tool=args.tool, roots=args.root)
+    if cmd == "runtime-run":
+        return runtime.run(conn, proj, settings, args.command, report=args.report, trusted=args.trusted, image=args.image,
+                           timeout=args.timeout, network=args.network)
+    if cmd == "runtime-runs":
+        return runtime.runs(conn)
+    if cmd == "license":
+        return license_mod.scan(conn, proj)
+    if cmd == "slice":
+        return port.slice_(conn, proj, args.targets, depth=args.depth, within=args.within)
+    if cmd == "port-create":
+        return port.create(conn, proj, name=args.name, targets=args.targets, target_language=args.language,
+                           target_root=args.target_root, author=args.agent, within=args.within, depth=args.depth)
+    if cmd == "port-map":
+        if args.follow:
+            return port.follow(conn, args.port_id, args.agent)
+        if not args.json:
+            raise ToolError("invalid_request", "--json 또는 --follow 가 필요함")
+        return port.map_items(conn, args.port_id, _as_list(_load_json(args.json)), args.agent)
+    if cmd == "port-accept":
+        return port.accept(conn, args.port_id, args.case, args.reason, args.agent)
+    if cmd == "port-status":
+        return port.status_(conn, args.port_id) if args.port_id else port.list_(conn)
+    if cmd == "port-approve":
+        return _port_approve(conn, args.port_id, list_only=args.list)
+    if cmd == "port-finish":
+        return port.finish(conn, args.port_id, args.agent)
+    if cmd == "port-capture":
+        return port.capture(conn, proj, settings, args.port_id, args.cases, source_url=args.source_url,
+                            source_cmd=args.source_cmd, source_cli=args.source_cli, trusted=args.trusted, timeout=args.timeout,
+                            source_image=args.source_image, explore_n=args.explore, seed=args.seed,
+                            coverage_cmd=args.coverage_cmd, coverage_report=args.coverage_report)
+    if cmd == "port-verify":
+        return port.verify(conn, proj, settings, args.port_id, target_url=args.target_url, target_cmd=args.target_cmd,
+                           target_cli=args.target_cli, cases_file=args.cases, source_url=args.source_url,
+                           source_cmd=args.source_cmd, source_cli=args.source_cli, trusted=args.trusted, timeout=args.timeout,
+                           source_image=args.source_image, explore_n=args.explore, seed=args.seed, concurrency=args.concurrency,
+                           target_coverage_cmd=args.target_coverage_cmd, target_coverage_report=args.target_coverage_report)
     if cmd == "classify":
         return loop.classify_files(conn, paths=args.paths, category=args.category, reason=args.reason)
     raise ToolError("invalid_request", f"알 수 없는 명령: {cmd}")
+
+
+def _port_approve(conn, port_id: str, *, list_only: bool) -> dict:
+    """사람이 터미널에서 직접 승인. 표준 입력·출력이 실제 터미널이 아니면(에이전트가 파이프로 실행) 거부한다."""
+    items = port.pending_reviews(conn, port_id)
+    if list_only or not items:
+        return {"pending": items, "note": "승인 대기 없음" if not items else "사용자가 터미널에서 port-approve 를 직접 실행해 승인"}
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ToolError("human_required", "승인은 사용자가 터미널에서 직접 입력해야 함 (지금 입력이 터미널이 아님)",
+                        recovery="사용자에게 이 명령을 터미널에서 직접 실행해 달라고 요청하거나, MCP oss_port_approve 확인 창 사용",
+                        data={"pending": [{k: i[k] for k in ("item_id", "kind", "summary")} for i in items]})
+    sys.stderr.write(f"승인 대기 {len(items)}건\n" + port_guard.render(items) + "\n\n")
+    sys.stderr.write("모두 승인하려면 '승인', 일부만이면 번호(예: 1,3), 취소는 Enter: ")
+    sys.stderr.flush()
+    answer = sys.stdin.readline().strip()
+    if answer == "승인":
+        chosen = items
+    elif answer:
+        try:
+            idx = {int(x) for x in answer.replace(" ", "").split(",") if x}
+        except ValueError:
+            raise ToolError("invalid_request", "번호는 쉼표로 구분 (예: 1,3)") from None
+        chosen = [it for i, it in enumerate(items, 1) if i in idx]
+    else:
+        return {"approved": [], "note": "취소함"}
+    done = port_guard.approve(conn, port_id, chosen, channel="cli-tty")
+    return {"approved": done, **{k: v for k, v in port.status_(conn, port_id, brief=True).items()
+                                 if k in ("gates", "next_step", "approvals")}}
 
 
 def _lsp_batch(conn, settings, proj: dict, queries: list[dict]) -> dict:

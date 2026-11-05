@@ -2,9 +2,10 @@
 name: oss-analyze
 description: >-
   오픈소스(또는 소스가 있는 저장소)를 단위별로 빠짐없이 전수 분석해서 기능 카탈로그·동작 명세·미확인 목록을
-  근거(파일:줄)와 함께 만든다. oss-analyzer MCP 도구(oss_*)를 사용한다.
+  근거(파일:줄)와 함께 만든다. 분석한 기능을 다른 저장소·언어로 옮기고 원본과 같은지 검증(포팅)도 한다.
+  oss-analyzer MCP 도구(oss_*) 또는 같은 기능의 CLI(`oss-analyzer`)를 사용한다.
   "이 오픈소스 전부 분석해줘", "어떤 기능이 있는지 다 파악해줘", "커스텀하기 전에 구조 다 뜯어봐줘",
-  "빠진 거 없이 분석", "전수 분석", "oss 분석" 같은 요청에 사용한다.
+  "빠진 거 없이 분석", "전수 분석", "oss 분석", "툴킷 써서 옮겨줘/포팅해줘" 같은 요청에 사용한다.
   대략적인 요약만 필요하면 이 스킬 대신 그냥 읽고 답한다. 소스 없는 바이너리 분석은 REA 같은 도구를 쓴다.
 ---
 
@@ -14,6 +15,12 @@ description: >-
 
 ## 0. 준비
 
+0. 도구 찾기 — 경로를 짐작하거나 문서·메모에 적지 않는다 (설치 위치는 사람마다 다르다).
+   - `oss_*` MCP 도구가 보이면 그것을 쓴다.
+   - 없으면 CLI `oss-analyzer` 를 PATH 에서 부른다 (`oss-analyzer doctor`). 명령이 없으면 멈추고 사용자에게
+     툴킷 설치(README 의 설치 — `pipx install` 등)를 요청하거나, 설치된 위치를 사용자에게 물어 그 세션에서만 쓴다.
+   - doctor 의 `integration.skill.state` 가 `outdated` 면 이 스킬이 설치본보다 오래된 것 — 사용자에게
+     `oss-analyzer setup --apply skill` 을 권하고, 그 전까지는 CLI 응답(`next_step`·오류의 `recovery`)을 우선한다.
 1. `oss_doctor(languages=[...])` — `ready=false` 면 `install_hints` 를 사용자에게 보여주고 멈춘다.
 2. `oss_repo_open(source, ref?)` — 커밋이 고정된 분석 전용 clone 이 만들어진다. 이후 모든 근거는 이 커밋 기준.
 3. `oss_inventory_build(project_id)` — 결과의 `by_category.unclassified`, `missing_rulepacks`, `unknowns_open` 을 사용자에게 먼저 보고.
@@ -73,6 +80,46 @@ oss_unit_next(agent) → oss_unit_context(unit_id, agent) [next_offset 이 있�
 - 범위 밖이면 `out-of-scope` + 사유
 - 지금 도구로 못 푸는 것(L2·L3 필요)은 열어 둔다 — 리포트에 그대로 남는 게 정상
 
+## 4.5 실행 검증·라이선스 (선택)
+
+- 커버리지 리포트가 있으면 `oss_runtime_ingest` → hit 의 evidence_id 는 **L3 근거** (required_level L3 미확인 해결에 인용).
+- 직접 돌려야 하면 `oss_runtime_run` — Docker 가 있으면 image 를 주고(네트워크 차단), 없으면 **사용자가 신뢰한다고 말한 저장소만** `trusted=True`.
+- `oss_license_scan` — 저장소와 다른 계열(카피레프트·소스 공개형) 파일은 미확인으로 올라온다. 커스텀·재배포 전에 사용자에게 보고.
+
+## 4.6 커스텀 (사용자가 기능을 바꾸려 할 때)
+
+1. `oss_extension_points` — 코어를 고치지 않고 할 수 있는지 먼저 본다 (interface·registry·middleware·config-key).
+2. `oss_impact_analyze(targets, verify=True)` — 영향받는 진입점·테스트·단위. `possible=true` 는 이름 일치 후보라 직접 확인.
+3. `oss_customization_record` — 할 변경을 원장에. `consider_instead` 가 붙으면 확장 포인트 대안을 사용자에게 제시.
+4. 업스트림 새 버전: `oss_repo_open(ref=새 태그)` → `oss_inventory_build` → `oss_compare_versions(기준, 새 버전)`
+   → `customization_conflicts`(앵커가 제거·이름 변경·시그니처 변경)와 `stale_claims` 를 보고, `reusable_completed_units` 는 다시 분석하지 않는다.
+
+## 4.7 포팅 (기능을 내 저장소로 옮기거나 다른 언어로 다시 만들 때)
+
+1. `oss_port_slice(["POST /api/..."])` — 옮길 범위. `registrations`·`wiring`(import 부수효과 등록)·`state` 를 빠뜨리지 않는다.
+   `license_warning` 이 있으면 먼저 사용자에게 보고한다.
+2. `oss_port_create(target_language, target_root=내 저장소)` → 항목마다 pending.
+3. 케이스 파일 작성(정상·경계·오류 응답 포함, id 같은 값은 `match` 정규식, 함수 단위는 `call`) → `oss_port_capture` 로 원본 응답을 골든으로.
+   - 원본 실행은 `source_image`(Docker 격리)가 기본. 이미지가 없을 때 사용자가 신뢰한다고 한 저장소만 `trusted=True`.
+   - `explore_n`(예: 40~60)으로 입력 변형 케이스를 같이 만들고, `coverage_report`(+`coverage_cmd`)로 케이스 충분성을 잰다.
+     `adequacy.not_executed`·`untested_lines` 가 남으면 그 분기를 거치는 케이스를 추가한다.
+4. 대상 구현 → `oss_port_map`(ported 는 내 코드 '경로:줄', omitted·replaced 는 사유) → `oss_port_verify`(`concurrency` 로 동시 요청까지).
+   - 생성 케이스 실패는 `failures_by_origin` 으로 묶어 원인별로 보고. `target_crashes` 는 대상이 그 입력에서 죽은 것.
+   - 원본과 다르게 두는 게 맞는 차이는 `oss_port_accept`(사유 필수)로 **제안**만 한다. 생략(omitted)과
+     capture 사이의 케이스 삭제·변경도 같다 — 모두 사용자 승인 전까지 게이트 미충족.
+   - 원본을 계측할 수 없으면(릴리스 빌드 바이너리 등) `target_coverage_report`(+`target_coverage_cmd`)로 대상 커버리지를 잰다.
+   - 대상 코드를 고친 뒤 `broken_targets` 에 `moved_to` 가 있으면 `oss_port_map(follow=True)`.
+5. 승인 대기가 있으면 내용(차이·사유)을 사용자에게 설명하고 `oss_port_approve` 를 호출한다 — 확인 창에 사용자가 직접 답한다.
+   확인 창이 안 뜨는 클라이언트면 사용자에게 터미널에서 `oss-analyzer port-approve <project> <port>` 를 직접 실행해 달라고 한다.
+   **에이전트가 승인하지 않는다** (파이프로 실행하면 거부되고, 사람 채널이 아닌 승인은 게이트가 인정하지 않는다).
+6. 매 단계 응답의 `next_step` 을 따른다. 마지막에 `oss_port_finish` — 발급된 판정(finished id)이 있을 때만 "포팅 완료"라고 보고.
+   실패 케이스는 원본/대상 값을 그대로, 근거의 limitations 도 함께 보여 준다.
+7. 원장(`ledger.db`)·골든 파일을 직접 고치지 않는다. 툴킷 밖 수정은 기록 무결 게이트가 잡아 실패한다.
+
+**포팅 게이트** (전부 충족해야 `oss_port_finish` 발급): 매핑 완료 · ported 위치/줄 내용 그대로 ·
+차등 검증 통과(마지막 capture 케이스 전부, **검증 뒤 대상 코드가 바뀌면 무효**) · 케이스 충분성(원본 또는 대상 커버리지) ·
+사람 승인(차이 허용·생략·케이스 변경, **승인 뒤 내용이 바뀌면 무효**) · 기록 무결 · 라이선스.
+
 ## 5. 마무리
 
 1. `oss_report_coverage` — `gates` 중 실패 항목을 사용자에게 그대로 보고 (실패를 숨기지 않는다).
@@ -83,4 +130,4 @@ oss_unit_next(agent) → oss_unit_context(unit_id, agent) [next_offset 이 있�
 
 - `secret` 범주 파일을 읽거나 인용하지 않는다 (`.env`, 키 파일 등).
 - 근거 없이 "전부 분석했다"고 말하지 않는다 — `complete=true` 일 때만.
-- 분석 대상 코드를 빌드·실행하지 않는다 (격리 실행은 3단계 기능).
+- 분석 대상 코드를 직접(셸로) 빌드·실행하지 않는다 — 실행은 `oss_runtime_run` 으로만 (Docker 격리, 아니면 사용자가 신뢰한 저장소만).

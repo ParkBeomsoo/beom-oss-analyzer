@@ -26,6 +26,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "oss_analyzer.rulepacks" = ["*.yml"]
+"oss_analyzer" = ["skills/*/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

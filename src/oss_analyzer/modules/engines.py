@@ -36,17 +36,20 @@ def oss_lsp_call_hierarchy(project_id: str, path: str, line: int, column: int, d
 
 @mcp.tool()
 @enveloped("engines.dataflow_build")
-def oss_dataflow_build(project_id: str, language: str | None = None, rebuild: bool = False) -> dict:
-    """데이터 흐름용 CPG 를 만든다 (Joern). 처음 한 번 오래 걸리고 이후엔 캐시. language 생략 시 주 언어."""
+def oss_dataflow_build(project_id: str, language: str | None = None, rebuild: bool = False,
+                       scope: list[str] | None = None) -> dict:
+    """데이터 흐름용 CPG 를 만든다 (Joern). 처음 한 번 오래 걸리고 이후엔 캐시. language 생략 시 주 언어.
+    테스트·테스트 데이터·외부 코드는 항상 제외. scope(경로 접두 목록)를 주면 그 아래만 — 큰 저장소에서 시간 단축."""
     from oss_analyzer.core import dataflow
 
     conn, proj = project.load(settings, project_id)
-    return dataflow.build(conn, settings, proj, language, rebuild)
+    return dataflow.build(conn, settings, proj, language, rebuild, scope)
 
 
 @mcp.tool()
 @enveloped("engines.dataflow_query")
-def oss_dataflow_query(project_id: str, queries: list[dict], language: str | None = None) -> dict:
+def oss_dataflow_query(project_id: str, queries: list[dict], language: str | None = None,
+                       scope: list[str] | None = None) -> dict:
     """값 흐름(L2): 소스(함수 정의 줄 → 매개변수, 또는 호출 줄 → 인자)에서 sink(호출 이름 정규식)까지 흐르는지.
 
     Args:
@@ -56,7 +59,7 @@ def oss_dataflow_query(project_id: str, queries: list[dict], language: str | Non
     from oss_analyzer.core import dataflow
 
     conn, proj = project.load(settings, project_id)
-    return dataflow.query(conn, settings, proj, queries, language)
+    return dataflow.query(conn, settings, proj, queries, language, scope)
 
 
 @mcp.tool()

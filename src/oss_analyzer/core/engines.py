@@ -88,7 +88,15 @@ def lsp_call_hierarchy(conn, pool: LspPool, project: dict, path: str, line: int,
     if direction not in {"incoming", "outgoing"}:
         raise ToolError("invalid_request", "direction 은 incoming 또는 outgoing")
     lang = _language(conn, path)
-    calls = pool.get(Path(project["repo_dir"]), lang).call_hierarchy(path, line, column, direction)
+    try:
+        calls = pool.get(Path(project["repo_dir"]), lang).call_hierarchy(path, line, column, direction)
+    except ToolError:
+        raise
+    except Exception as e:  # noqa: BLE001 — 서버가 callHierarchy 를 지원하지 않는 경우 (jedi-language-server 등)
+        if "-32601" in str(e) or "Method Not Found" in str(e):
+            raise ToolError("capability_unavailable", f"{lang} 언어 서버가 callHierarchy 를 지원하지 않음",
+                            recovery="references 로 대신 조회 (호출 외 참조도 섞이므로 위치를 읽고 판단)") from e
+        raise
     raw_locs, peers = [], []
     for c in calls:
         peer = c["peer"]
