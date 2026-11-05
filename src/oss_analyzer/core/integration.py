@@ -5,6 +5,7 @@ REA 의 setup/doctor 방식을 따른다:
 - 스킬은 패키지에 함께 들어 있고(oss_analyzer/skills), 설치한 사본에는 소유 표시(버전·지문)를 남긴다.
   표시가 없는 같은 이름의 스킬은 사용자 것으로 보고 덮어쓰지 않는다. 지문이 다르면 outdated.
 - MCP 등록이 다른 설치(다른 Python)를 가리키면 foreign — 자동으로 바꾸지 않는다.
+- 범위: user(이 사용자의 모든 프로젝트) 또는 project(한 프로젝트에서만 — 그 프로젝트의 .claude/skills, .mcp.json).
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from oss_analyzer import __version__
 SKILL_NAME = "oss-analyze"
 MCP_NAME = "oss-analyzer"
 MANIFEST = ".oss-analyzer-skill.json"
+SCOPES = ("user", "project")
 
 
 def bundled_skill() -> Path:
@@ -43,13 +45,23 @@ def claude_home() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 
 
-def skill_destination() -> Path:
+def _check_scope(scope: str) -> None:
+    if scope not in SCOPES:
+        raise ValueError(f"scope 는 {SCOPES} 중 하나")
+
+
+def skill_destination(scope: str = "user", project_dir: Path | None = None) -> Path:
+    _check_scope(scope)
+    if scope == "project":
+        return Path(project_dir or Path.cwd()).resolve() / ".claude" / "skills" / SKILL_NAME
     return claude_home() / "skills" / SKILL_NAME
 
 
 def skill_status(dst: Path | None = None) -> dict:
     dst = dst or skill_destination()
     want = skill_digest(bundled_skill())
+    if dst.is_symlink():
+        return {"state": "foreign", "target": str(dst), "note": "링크로 된 스킬 폴더 — 관리하지 않는다 (일반 폴더로 바꾸거나 그대로 사용)"}
     if not (dst / "SKILL.md").exists():
         return {"state": "missing", "target": str(dst)}
     m = dst / MANIFEST
@@ -84,7 +96,8 @@ def install_skill(backup_dir: Path, dst: Path | None = None) -> dict:
     (dst / MANIFEST).write_text(json.dumps({"tool": "oss-analyzer", "version": __version__, "digest": skill_digest(src)},
                                            ensure_ascii=False, indent=2), encoding="utf-8")
     after = skill_status(dst)
-    return {"ok": after["state"] == "current", "target": str(dst), "backup": str(backup) if backup else None, "state": after["state"]}
+    return {"ok": after["state"] == "current", "target": str(dst), "backup": str(backup) if backup else None,
+            "state": after["state"], "note": "Claude Code 를 다시 시작하거나 새 세션에서 스킬이 보인다"}
 
 
 def remove_skill(dst: Path | None = None) -> dict:
@@ -109,44 +122,53 @@ def _norm(s: str) -> str:
     return s.replace("\\", "/").lower()
 
 
-def mcp_status() -> dict:
+def _claude(args: list[str], cwd: Path | None, timeout: int = 60) -> subprocess.CompletedProcess | None:
     claude = shutil.which("claude")
     if not claude:
-        return {"state": "unknown", "note": "claude CLI 가 PATH 에 없음 — Claude Code 등록 여부를 확인할 수 없음"}
+        return None
+    return subprocess.run([claude, *args], capture_output=True, timeout=timeout, cwd=cwd)
+
+
+def mcp_status(scope: str = "user", project_dir: Path | None = None) -> dict:
+    _check_scope(scope)
+    cwd = Path(project_dir or Path.cwd()) if scope == "project" else None
     try:
-        proc = subprocess.run([claude, "mcp", "get", MCP_NAME], capture_output=True, timeout=60)
+        proc = _claude(["mcp", "get", MCP_NAME], cwd)
     except (OSError, subprocess.TimeoutExpired) as e:
         return {"state": "unknown", "note": f"claude mcp get 실패: {type(e).__name__}"}
+    if proc is None:
+        return {"state": "unknown", "note": "claude CLI 가 PATH 에 없음 — Claude Code 등록 여부를 확인할 수 없음"}
     text = (proc.stdout + proc.stderr).decode("utf-8", "replace")
     if proc.returncode != 0:
         return {"state": "missing"}
     if _norm(sys.executable) in _norm(text):
         return {"state": "current"}
-    return {"state": "foreign", "note": "oss-analyzer 등록이 다른 설치(다른 Python)를 가리킴 — 자동으로 바꾸지 않는다. "
-                                        "확인 후 'claude mcp remove -s user oss-analyzer' 하고 다시 등록"}
+    return {"state": "foreign", "note": "oss-analyzer 등록이 다른 설치(다른 Python 또는 플러그인)를 가리킴 — 자동으로 바꾸지 않는다. "
+                                        "확인 후 'claude mcp remove oss-analyzer' 하고 다시 등록"}
 
 
-def register_mcp() -> dict:
-    st = mcp_status()
+def register_mcp(scope: str = "user", project_dir: Path | None = None) -> dict:
+    st = mcp_status(scope, project_dir)
     if st["state"] == "current":
         return {"ok": True, "skipped": "이미 이 설치로 등록됨"}
     if st["state"] != "missing":
         return {"ok": False, "error": st.get("note", st["state"])}
-    argv = [shutil.which("claude") or "claude", "mcp", "add", "-s", "user", MCP_NAME, "--", *mcp_command()]
-    proc = subprocess.run(argv, capture_output=True, timeout=120)
-    return {"ok": proc.returncode == 0, "exit_code": proc.returncode,
+    cwd = Path(project_dir or Path.cwd()) if scope == "project" else None
+    proc = _claude(["mcp", "add", "-s", scope, MCP_NAME, "--", *mcp_command()], cwd, timeout=120)
+    return {"ok": proc.returncode == 0, "scope": scope, "exit_code": proc.returncode,
             "output": (proc.stdout + proc.stderr).decode("utf-8", "replace")[-800:],
-            "note": "Claude Code 를 다시 시작해야 도구가 보인다"}
+            "note": "Claude Code 를 다시 시작해야 도구가 보인다"
+                    + (" (project 범위는 그 프로젝트의 .mcp.json — 팀과 공유하려면 커밋, 개인용이면 커밋하지 않음)" if scope == "project" else "")}
 
 
-def unregister_mcp() -> dict:
-    st = mcp_status()
+def unregister_mcp(scope: str = "user", project_dir: Path | None = None) -> dict:
+    st = mcp_status(scope, project_dir)
     if st["state"] == "missing":
         return {"ok": True, "skipped": "등록돼 있지 않음"}
     if st["state"] != "current":
         return {"ok": False, "error": st.get("note", "이 설치의 등록이 아님 — 지우지 않는다")}
-    proc = subprocess.run([shutil.which("claude") or "claude", "mcp", "remove", "-s", "user", MCP_NAME],
-                          capture_output=True, timeout=120)
+    cwd = Path(project_dir or Path.cwd()) if scope == "project" else None
+    proc = _claude(["mcp", "remove", "-s", scope, MCP_NAME], cwd, timeout=120)
     return {"ok": proc.returncode == 0, "exit_code": proc.returncode}
 
 
@@ -166,5 +188,6 @@ def cli_status() -> dict:
             **({} if same else {"note": "PATH 의 oss-analyzer 가 이 설치와 다른 폴더 — pipx/uv 설치면 정상, 아니면 버전 확인"})}
 
 
-def status() -> dict:
-    return {"version": __version__, "cli": cli_status(), "skill": skill_status(), "mcp": mcp_status()}
+def status(scope: str = "user", project_dir: Path | None = None) -> dict:
+    return {"version": __version__, "scope": scope, "cli": cli_status(),
+            "skill": skill_status(skill_destination(scope, project_dir)), "mcp": mcp_status(scope, project_dir)}

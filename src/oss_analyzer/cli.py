@@ -45,6 +45,10 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--languages", nargs="*")
     p.add_argument("--apply", nargs="+", metavar="ID", help="plan 의 components[].id (체크섬 검증 후 설치)")
     p.add_argument("--remove", nargs="+", metavar="ID", help="되돌리기: skill, mcp-register (이 툴킷이 설치한 것만)")
+    p.add_argument("--update", action="store_true", help="툴킷 업데이트 뒤 — 이미 설치한 스킬만 새 버전으로 (새로 설치하지 않음)")
+    p.add_argument("--scope", choices=["user", "project"], default="user",
+                   help="스킬·MCP 연동 범위: user(모든 프로젝트) / project(--project-dir 한 곳만)")
+    p.add_argument("--project-dir", help="--scope project 의 프로젝트 폴더 (기본: 현재 폴더)")
 
     for name, help_ in (("coverage", "커버리지"), ("features", "기능 카탈로그"), ("unknowns", "열린 미확인"),
                         ("units", "단위 목록"), ("export", "리포트 내보내기"), ("pending", "독립 검토 대기 결론")):
@@ -244,11 +248,14 @@ def _run(args: argparse.Namespace) -> Any:
     if args.cmd == "setup":
         from oss_analyzer.core import setup
 
+        pdir = Path(args.project_dir) if args.project_dir else None
+        if args.update:
+            return setup.update(settings, args.scope, pdir)
         if args.apply:
-            return setup.apply(settings, args.apply, args.languages)
+            return setup.apply(settings, args.apply, args.languages, args.scope, pdir)
         if args.remove:
-            return setup.remove(settings, args.remove)
-        return setup.plan(settings, args.languages)
+            return setup.remove(settings, args.remove, args.scope, pdir)
+        return setup.plan(settings, args.languages, args.scope, pdir)
     if args.cmd == "compare":
         out = customize.compare_versions(settings, args.base_project_id, args.head_project_id, args.limit)
         if args.save:

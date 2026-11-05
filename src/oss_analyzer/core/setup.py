@@ -29,7 +29,8 @@ def _pip(*pkgs: str) -> list[str]:
     return [sys.executable, "-m", "pip", "install", "-q", *pkgs]
 
 
-def components(settings: Settings, languages: list[str] | None) -> list[dict]:
+def components(settings: Settings, languages: list[str] | None, scope: str = "user",
+               project_dir: Path | None = None) -> list[dict]:
     """구성 요소 목록 — (이름, 필요 이유, 설치 방법, 라이선스, 현재 상태)."""
     doc = doctor.run(settings, languages)
     eng, lsp = doc["engines"], doc["lsp"]
@@ -69,12 +70,12 @@ def components(settings: Settings, languages: list[str] | None) -> list[dict]:
     out.append({"id": "cli", "why": "어느 폴더·세션에서나 `oss-analyzer` 명령으로 부르기 (스킬은 경로를 적지 않는다)",
                 "installed": cli["state"] != "missing", "kind": "manual", "state": cli["state"],
                 "hint": cli.get("hint") or cli.get("note") or cli.get("path")})
-    mcp = integration.mcp_status()
+    mcp = integration.mcp_status(scope, project_dir)
     out.append({"id": "mcp-register", "why": "Claude Code 에 MCP 서버 등록 (사용자 범위, 이 설치의 Python 으로)",
                 "installed": mcp["state"] == "current", "state": mcp["state"], "kind": "mcp", "needs": "claude",
-                "command": ["claude", "mcp", "add", "-s", "user", integration.MCP_NAME, "--", *integration.mcp_command()],
+                "command": ["claude", "mcp", "add", "-s", scope, integration.MCP_NAME, "--", *integration.mcp_command()],
                 **({"note": mcp["note"]} if mcp.get("note") else {})})
-    sk = integration.skill_status()
+    sk = integration.skill_status(integration.skill_destination(scope, project_dir))
     out.append({"id": "skill", "why": "분석·포팅 절차 스킬 (이 설치에 들어 있는 사본을 Claude Code 개인 스킬 폴더로)",
                 "installed": sk["state"] == "current", "state": sk["state"], "kind": "skill", "target": sk["target"],
                 **({"note": sk["note"]} if sk.get("note") else {})})
@@ -103,8 +104,9 @@ def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-def plan(settings: Settings, languages: list[str] | None = None) -> dict:
-    comps = components(settings, languages)
+def plan(settings: Settings, languages: list[str] | None = None, scope: str = "user",
+         project_dir: Path | None = None) -> dict:
+    comps = components(settings, languages, scope, project_dir)
     missing = [c["id"] for c in comps if not c["installed"]]
     return {"components": comps, "missing": missing,
             "approve": f"oss-analyzer setup --apply {' '.join(m for m in missing if not _blocked(comps, m))}" if missing else None,
@@ -206,8 +208,9 @@ def _install_release(c: dict, settings: Settings) -> dict:
     return {"asset": name, "verified": algo, "target": str(target)}
 
 
-def apply(settings: Settings, ids: list[str], languages: list[str] | None = None) -> dict:
-    comps = {c["id"]: c for c in components(settings, languages)}
+def apply(settings: Settings, ids: list[str], languages: list[str] | None = None, scope: str = "user",
+          project_dir: Path | None = None) -> dict:
+    comps = {c["id"]: c for c in components(settings, languages, scope, project_dir)}
     results = []
     for cid in ids:
         c = comps.get(cid)
@@ -228,26 +231,44 @@ def apply(settings: Settings, ids: list[str], languages: list[str] | None = None
                 rs = [_run(cmd) for cmd in c["commands"]]
                 results.append({"id": cid, "ok": all(r["exit_code"] == 0 for r in rs), "steps": rs})
             elif c["kind"] == "skill":
-                results.append({"id": cid, **integration.install_skill(settings.home / "backups")})
+                results.append({"id": cid, **integration.install_skill(
+                    settings.home / "backups", integration.skill_destination(scope, project_dir))})
             elif c["kind"] == "mcp":
-                results.append({"id": cid, **integration.register_mcp()})
+                results.append({"id": cid, **integration.register_mcp(scope, project_dir)})
             elif c["kind"] == "github-release":
                 results.append({"id": cid, "ok": True, **_install_release(c, settings)})
         except ToolError as e:
             results.append({"id": cid, "ok": False, "error": e.message})
         except (OSError, subprocess.TimeoutExpired, ValueError) as e:
             results.append({"id": cid, "ok": False, "error": f"{type(e).__name__}: {e}"})
-    return {"results": results, "after": plan(settings, languages)["missing"]}
+    return {"results": results, "after": plan(settings, languages, scope, project_dir)["missing"]}
 
 
-def remove(settings: Settings, ids: list[str]) -> dict:
+def remove(settings: Settings, ids: list[str], scope: str = "user", project_dir: Path | None = None) -> dict:
     """에이전트 연동 되돌리기 — 이 툴킷이 설치·등록한 것만 지운다 (소유 표시·등록 대상 확인)."""
     results = []
     for cid in ids:
         if cid == "skill":
-            results.append({"id": cid, **integration.remove_skill()})
+            results.append({"id": cid, **integration.remove_skill(integration.skill_destination(scope, project_dir))})
         elif cid == "mcp-register":
-            results.append({"id": cid, **integration.unregister_mcp()})
+            results.append({"id": cid, **integration.unregister_mcp(scope, project_dir)})
         else:
             results.append({"id": cid, "ok": False, "error": "되돌릴 수 있는 것은 skill, mcp-register (엔진은 직접 삭제)"})
     return {"results": results}
+
+
+def update(settings: Settings, scope: str = "user", project_dir: Path | None = None) -> dict:
+    """툴킷을 업데이트한 뒤 — 이 툴킷이 설치한 연동만 새 버전에 맞춘다. 없던 것은 새로 설치하지 않는다."""
+    dst = integration.skill_destination(scope, project_dir)
+    sk = integration.skill_status(dst)
+    results = []
+    if sk["state"] == "outdated":
+        results.append({"id": "skill", "from": sk.get("installed_version"),
+                        **integration.install_skill(settings.home / "backups", dst)})
+    else:
+        results.append({"id": "skill", "ok": sk["state"] != "foreign", "skipped": sk["state"], **({"note": sk["note"]} if sk.get("note") else {})})
+    mcp = integration.mcp_status(scope, project_dir)
+    results.append({"id": "mcp-register", "ok": mcp["state"] in ("current", "missing", "unknown"), "state": mcp["state"],
+                    **({"note": mcp["note"]} if mcp.get("note") else {}),
+                    **({"note": "등록은 실행 중인 Python 경로라 같은 설치를 업그레이드하면 그대로 맞다"} if mcp["state"] == "current" else {})})
+    return {"version": integration.__version__, "scope": scope, "results": results}

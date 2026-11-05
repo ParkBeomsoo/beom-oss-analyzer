@@ -39,3 +39,24 @@ def test_mcp_command_uses_running_interpreter():
     import sys
 
     assert integration.mcp_command()[0] == sys.executable
+
+
+def test_plugin_manifest_matches_package():
+    import json
+    from pathlib import Path
+
+    from oss_analyzer import __version__
+
+    root = Path(__file__).resolve().parents[1]
+    plugin = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    market = json.loads((root / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+    assert plugin["version"] == __version__ == market["plugins"][0]["version"]
+    assert plugin["mcpServers"]["oss-analyzer"]["args"][-1] == __version__  # 실행기가 버전 차이를 경고
+    assert (root / plugin["skills"] / "oss-analyze" / "SKILL.md").exists()
+    assert (root / "plugin" / "launch_mcp.py").exists()
+
+
+def test_project_scope_skill_destination(tmp_path):
+    dst = integration.skill_destination("project", tmp_path)
+    assert dst == tmp_path.resolve() / ".claude" / "skills" / "oss-analyze"
+    assert integration.install_skill(tmp_path / "b", dst)["ok"] and integration.skill_status(dst)["state"] == "current"

@@ -62,6 +62,8 @@ oss-analyzer setup --languages python typescript   # 계획만 (아무것도 바
 oss-analyzer setup --apply codebase-memory-mcp joern lsp:python coverage
 oss-analyzer setup --apply skill mcp-register      # Claude Code 연동 (아래)
 oss-analyzer setup --remove skill mcp-register     # 되돌리기 — 이 툴킷이 설치·등록한 것만
+oss-analyzer setup --update                        # 툴킷 업그레이드 뒤 — 이미 설치한 스킬만 새 버전으로 (새로 설치하지 않음)
+oss-analyzer setup --apply skill mcp-register --scope project --project-dir <프로젝트>   # 한 프로젝트에서만
 ```
 
 언어 런타임(JDK·Node.js·Go·Rust)은 직접 설치한다. 격리 실행용 Docker 는 Windows 에서 `oss-analyzer setup --apply sandbox` 가 WSL 배포판(`oss-sandbox`, Debian)에 Docker Engine(Apache-2.0)을 설치한다 — Docker Desktop(일정 규모 이상 회사의 업무 사용은 유료 구독)이 필요 없다. 네이티브 `docker` 데몬이 있으면 그것을 먼저 쓴다(`OSS_ANALYZER_CONTAINER=auto|docker|wsl|none`). 수동 설치 경로:
@@ -79,7 +81,20 @@ Claude Code 연동 (`setup --apply skill mcp-register`):
   같은 이름의 스킬을 직접 만들어 둔 경우(소유 표시 없음)는 덮어쓰지 않는다.
 - **MCP**: `claude mcp add -s user oss-analyzer -- <이 설치의 python> -m oss_analyzer.main` — 경로는 setup 이 실행 중인 설치에서 구한다.
   다른 설치를 가리키는 등록이 이미 있으면 바꾸지 않고 알려 준다.
+- **범위**: 기본 `--scope user`(이 사용자의 모든 프로젝트). `--scope project` 는 그 프로젝트의 `.claude/skills` 와
+  `.mcp.json` 에만 넣는다 — 분석 도구를 특정 작업 폴더에서만 보이게 할 때. (도구가 안 보일 뿐, 같은 계정의 셸에서
+  `oss-analyzer` 명령은 그대로 쓸 수 있다)
 - MCP 없이 CLI 만 써도 된다 — 스킬이 CLI 절차(`CLI.md`)를 함께 안내하고, 포팅 지킴이(승인·완료 판정)는 CLI 에서도 똑같이 동작한다.
+
+Claude Code 플러그인으로 받기 (스킬 + MCP 한 번에, 툴킷 자체는 위처럼 먼저 설치):
+
+```bash
+claude plugin marketplace add ParkBeomsoo/beom-oss-analyzer
+claude plugin install beom-oss-analyzer@beom-oss-analyzer
+```
+
+플러그인의 MCP 는 `plugin/launch_mcp.py` 가 이미 설치된 툴킷을 찾아 띄운다 (아무것도 설치하지 않음 — 없으면 설치 안내를
+남기고 종료, 버전이 플러그인과 다르면 경고). 플러그인과 `setup --apply skill mcp-register` 는 같은 것을 넣으므로 하나만 쓴다.
 
 ## 사용
 
