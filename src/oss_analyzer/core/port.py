@@ -494,7 +494,7 @@ GATE_MAPPED = "모든 항목 매핑됨 (pending 0)"
 GATE_TARGETS = "ported 대상 위치가 모두 존재 (줄 내용도 그대로)"
 GATE_DIFF = "차등 검증 통과 (마지막 capture 의 케이스 전부, 지금 대상 코드 기준)"
 GATE_ADEQUACY = "케이스가 슬라이스 함수를 모두 실행 (원본 커버리지, 없으면 대상 커버리지)"
-GATE_HUMAN = "사람 확인 항목 모두 승인됨 (차이 허용·생략·케이스 변경)"
+GATE_HUMAN = "사람 확인 항목 모두 승인됨 (차이 허용·생략·케이스 변경·기대값)"
 GATE_INTEGRITY = "기록 무결 (툴킷 밖에서 원장·골든을 고치지 않음)"
 GATE_LICENSE = "라이선스 확인 필요 없음"
 
@@ -906,6 +906,64 @@ def _get_path(body, path: list[str]):
     return cur
 
 
+_MISSING = object()
+
+
+def _get_any(body, path: str):
+    """점 경로 값 (배열은 숫자 인덱스: items.0.price). 없으면 _MISSING."""
+    cur = body
+    for part in path.split(".") if path else []:
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        elif isinstance(cur, list) and part.lstrip("-").isdigit() and -len(cur) <= int(part) < len(cur):
+            cur = cur[int(part)]
+        else:
+            return _MISSING
+    return cur
+
+
+EXPECT_KEYS = {"status", "body", "equals", "match"}
+
+
+def check_expect(dst: dict, case: dict) -> list[str]:
+    """기대값 케이스 — 원본 대신 사람이 정한 기대값과 비교한다 (원본과 일부러 다르게 만든 동작, 원본에 없는 새 동작).
+    expect: {status?, body?(전체 비교, 케이스 ignore 적용), equals?: {점 경로: 값}, match?: {점 경로: 정규식}}"""
+    e = case["expect"]
+    diffs = []
+    if "status" in e and dst["status"] != e["status"]:
+        diffs.append(f"status {dst['status']} != 기대 {e['status']}")
+    body = dst["body"]
+    if "body" in e:
+        a, b = json.loads(json.dumps(e["body"])), json.loads(json.dumps(body))
+        for p in case.get("ignore") or []:
+            _drop(a, p.split("."))
+            _drop(b, p.split("."))
+        if a != b:
+            diffs.append(f"body 가 기대와 다름: 기대 {json.dumps(a, ensure_ascii=False)[:300]} / 대상 {json.dumps(b, ensure_ascii=False)[:300]}")
+    for p, want in (e.get("equals") or {}).items():
+        got = _get_any(body, p)
+        if got is _MISSING:
+            diffs.append(f"{p}: 대상에 없음 (기대 {want!r})")
+        elif got != want:
+            diffs.append(f"{p}: {got!r} != 기대 {want!r}")
+    for p, rx in (e.get("match") or {}).items():
+        got = _get_any(body, p)
+        if got is _MISSING or not re.fullmatch(rx, str(got)):
+            diffs.append(f"{p}: {None if got is _MISSING else got!r} 가 기대 /{rx}/ 와 맞지 않음")
+    return diffs
+
+
+def _case_diffs(s: dict, d: dict, c: dict) -> list[str]:
+    """한 케이스 판정 — 기대값 케이스는 기대값과, 나머지는 원본과."""
+    if d.get("error"):
+        return [f"대상 오류: {d['error']}"]
+    if c.get("expect"):
+        return check_expect(d, c)
+    if s.get("error"):
+        return [f"원본 오류: {s['error']}"]
+    return compare(s, d, c)
+
+
 def compare(src: dict, dst: dict, case: dict) -> list[str]:
     """케이스 규칙: compare=full(기본)|status, ignore=[점 경로], match={점 경로: 정규식} (양쪽 각각 검사)."""
     diffs = []
@@ -1040,7 +1098,14 @@ def _load_cases(path: Path) -> tuple[dict, list[dict]]:
     cases = data["cases"] if isinstance(data, dict) else data
     if not cases:
         raise ToolError("invalid_request", "cases 가 비어 있음")
-    return defaults, [{**defaults, **c} for c in cases]
+    out = [{**defaults, **c} for c in cases]
+    for i, c in enumerate(out):
+        name = c.get("name") or f"#{i + 1}"
+        if c.get("new") and not c.get("expect"):
+            raise ToolError("invalid_request", f"케이스 {name}: new(원본에 없는 동작)는 expect(기대값)가 필요함")
+        if "expect" in c and (not isinstance(c["expect"], dict) or not EXPECT_KEYS & set(c["expect"])):
+            raise ToolError("invalid_request", f"케이스 {name}: expect 는 {sorted(EXPECT_KEYS)} 중 하나 이상을 가진 객체")
+    return defaults, out
 
 
 # ---------------------------------------------------------------- 입력 탐색 (케이스 밖 입력)
@@ -1102,8 +1167,8 @@ def explore(cases: list[dict], n: int, seed: int = 0) -> list[dict]:
         return []
     gen, seen = [], set()
     for c in cases:
-        if c.get("generated") or c.get("explore") is False:
-            continue
+        if c.get("generated") or c.get("explore") is False or c.get("expect"):
+            continue  # 기대값은 그 입력에 대한 것 — 입력을 바꾼 변형에는 맞지 않는다
         for key in ("json", "args", "kwargs", "argv"):
             if key not in c:
                 continue
@@ -1222,6 +1287,21 @@ def _port_dir(settings: Settings, proj: dict, port_id: str) -> Path:
 
 def _run_source(conn, proj, settings, port, cases, *, url, cmd, cli, trusted, image, timeout,
                 coverage_cmd=None, coverage_report=None) -> dict:
+    """원본 실행. new(원본에 없는 동작) 케이스는 돌리지 않고 자리만 둔다."""
+    run_cases = [c for c in cases if not c.get("new")]
+    if not run_cases:
+        return {"results": [{"name": c.get("name") or f"case{i + 1}", "status": None, "body": None, "new": True}
+                            for i, c in enumerate(cases)], "adequacy": None, "graceful_stop": None}
+    got = _run_source_cases(conn, proj, settings, port, run_cases, url=url, cmd=cmd, cli=cli, trusted=trusted,
+                            image=image, timeout=timeout, coverage_cmd=coverage_cmd, coverage_report=coverage_report)
+    it = iter(got["results"])
+    got["results"] = [{"name": c.get("name") or f"case{i + 1}", "status": None, "body": None, "new": True}
+                      if c.get("new") else next(it) for i, c in enumerate(cases)]
+    return got
+
+
+def _run_source_cases(conn, proj, settings, port, cases, *, url, cmd, cli, trusted, image, timeout,
+                      coverage_cmd=None, coverage_report=None) -> dict:
     work, copy = _source_side(settings, proj, cases, cmd=cmd, cli=cli, trusted=trusted, image=image)
     side = _Side("source", copy or Path("."), _harness_dir(settings), image)
     server, adequacy = None, None
@@ -1337,8 +1417,12 @@ def capture(conn, proj: dict, settings: Settings, port_id: str, cases_file: str,
     change = guard.case_change(baseline, rules)
     adq_id = run["adequacy"].get("check_id") if isinstance(run["adequacy"], dict) else None
     cid = "cap_" + uuid.uuid4().hex[:12]
+    expectations = {c.get("name") or f"#{i}": {"expect": c["expect"], "new": bool(c.get("new")),
+                                                 "source": None if r.get("new") else
+                                                 {"status": r.get("status"), "body": json.dumps(r.get("body"), ensure_ascii=False)[:300]}}
+                    for i, (c, r) in enumerate(zip(cases, results)) if c.get("expect")}
     detail = {"golden": str(golden), "golden_sha": hashlib.sha256(golden.read_bytes()).hexdigest(), "rules": rules,
-              "baseline": baseline, "change": change, "adequacy_check": adq_id}
+              "baseline": baseline, "change": change, "adequacy_check": adq_id, "expectations": expectations}
     with ledger.tx(conn):
         conn.execute("INSERT INTO port_check (id, port_id, kind, cases, passed, failed, detail, evidence_id, created_at) "
                      "VALUES (?, ?, 'capture', ?, ?, ?, ?, NULL, ?)",
@@ -1346,6 +1430,9 @@ def capture(conn, proj: dict, settings: Settings, port_id: str, cases_file: str,
     guard.record(conn, port_id, "capture", {"id": cid, "cases": len(results)}, checks=[cid, adq_id])
     out = {"capture_id": cid, "golden": str(golden), "cases": len(results), "generated": len(generated), "errors": errors,
            "note": "골든은 원본의 실제 응답 — 대상 언어 테스트의 기대값으로 그대로 쓸 수 있다"}
+    if expectations:
+        out["expectations"] = {"cases": sorted(expectations),
+                               "note": "기대값 케이스는 원본 대신 기대값과 비교 — 기대값 자체는 사용자 승인(port-approve) 대상"}
     if change:
         out["case_change"] = {**change, "note": "이전 capture 대비 케이스가 빠지거나 바뀜 — 사용자 승인(port-approve) 전까지 게이트 미충족"}
     if generated:
@@ -1377,7 +1464,7 @@ def _concurrent(cases, src, side: _Side, saved: dict, *, url, cli, n: int, timeo
                 continue
             for r in ex.map(lambda _: _one(side, concrete, url=url, cli=cli, timeout=timeout), range(n)):
                 runs += 1
-                diffs = [f"대상 오류: {r['error']}"] if r.get("error") else compare(s, r, c)
+                diffs = _case_diffs(s, r, c)
                 if diffs and not r.get("error") and any(fnmatch.fnmatchcase(s["name"], pat) for pat, _ in allowed):
                     continue  # 사유와 함께 허용한 의도적 차이는 동시 실행에서도 같은 기준으로 본다
                 if diffs:
@@ -1447,13 +1534,16 @@ def verify(conn, proj: dict, settings: Settings, port_id: str, *, target_url: st
     allowed = _accepted(conn, port_id)
     rows, passed, accepted = [], 0, []
     for c, s, d in zip(cases, src, dst):
-        diffs = [f"원본 오류: {s['error']}"] if s.get("error") else [f"대상 오류: {d['error']}"] if d.get("error") else compare(s, d, c)
-        why = next((reason for pat, reason in allowed if diffs and fnmatch.fnmatchcase(s["name"], pat)), None)
+        diffs = _case_diffs(s, d, c)
+        # 기대값 케이스는 '차이 허용'으로 넘기지 않는다 — 기대값과 달라도 원본과 같아도, 기대값이 기준
+        why = None if c.get("expect") else next(
+            (reason for pat, reason in allowed if diffs and fnmatch.fnmatchcase(s["name"], pat)), None)
         if why and not s.get("error"):
             accepted.append({"name": s["name"], "reason": why, "diffs": diffs[:1], "diffs_full": diffs})
             diffs = []
         excused = [a["diffs_full"] for a in accepted if a["name"] == s["name"]] if why and not diffs else []
         rows.append({"name": s["name"], "ok": not diffs, "diffs": diffs, **({"generated": True} if c.get("generated") else {}),
+                     **({"expected": "new" if c.get("new") else "changed"} if c.get("expect") else {}),
                      **({"accepted": why, "accepted_diffs": excused[0]} if why and not diffs else {})})
         passed += not diffs
     failed = len(rows) - passed + (conc["mismatches"] if conc else 0)
@@ -1472,6 +1562,9 @@ def verify(conn, proj: dict, settings: Settings, port_id: str, *, target_url: st
         hit = guard.divergence_cases(rows, pat)
         if hit and not guard.is_approved(conn, port_id, f"diff:{pat}", guard.divergence_fp(pat, reason, hit)):
             unapproved.append(pat)
+    n_expect = sum(1 for c in cases if c.get("expect"))
+    if n_expect:
+        limitations.append(f"기대값 케이스 {n_expect}개는 원본이 아니라 사용자가 승인한 기대값과 비교")
     if accepted:
         limitations.append(f"의도적 차이로 허용한 케이스 {len(accepted)}개 (사유는 포팅 원장 divergence 항목)")
     if unapproved:

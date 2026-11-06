@@ -172,3 +172,44 @@ def test_cli_approve_refuses_without_terminal(tmp_path, settings, monkeypatch, c
         cli._port_approve(conn, pid, list_only=False)
     assert e.value.code == "human_required"
     assert cli._port_approve(conn, pid, list_only=True)["pending"]
+
+
+def test_check_expect_paths():
+    d = {"status": 200, "body": {"items": [{"price": "1000"}], "id": "ab12", "t": 5}}
+    assert port.check_expect(d, {"expect": {"status": 200, "equals": {"items.0.price": "1000"}, "match": {"id": "[a-z0-9]{4}"}}}) == []
+    assert port.check_expect(d, {"expect": {"body": {"items": [{"price": "1000"}], "id": "ab12"}}, "ignore": ["t"]}) == []
+    bad = port.check_expect(d, {"expect": {"status": 201, "equals": {"items.1.price": "x", "id": "zz"}}})
+    assert len(bad) == 3 and "대상에 없음" in bad[1]
+
+
+def test_expectation_case_replaces_divergence_and_needs_approval(tmp_path, settings):
+    """원본과 일부러 다르게 만든 동작 — 원본 대신 기대값과 비교, 기대값은 사람 승인, 값이 기대와 달라지면 실패."""
+    changed = "import json, sys\nn = list(map(int, sys.argv[1:]))\nprint(json.dumps({'sum': sum(n), 'count': 0}))\n"
+    cases = [{"name": "two", "argv": ["1", "2"], "expect": {"equals": {"sum": 3, "count": 0}}},
+             {"name": "none", "argv": []},
+             {"name": "neg", "new": True, "argv": ["-4"], "expect": {"equals": {"sum": -4}}}]
+    conn, proj, pid, target, _ = _setup(tmp_path, settings, target_code=changed, cases=cases)
+    golden = json.loads(Path(port._last_check(conn, pid, "capture")["detail"]["golden"]).read_text(encoding="utf-8"))
+    assert golden["results"][2].get("new") is True and golden["results"][2]["status"] is None  # 원본은 안 돌림
+    v = port.verify(conn, proj, settings, pid, target_cli=f"{PY} calc2.py")
+    # none: 원본과 비교 → count 0 vs 원본 0 → 통과 / two: 기대값과 비교 → 통과 / neg: 새 동작 → 통과
+    assert v["failed"] == 0 and v["passed"] == 3, v["failures"]
+    assert [r["kind"] for r in port.pending_reviews(conn, pid)] == ["expectation", "expectation"]
+    assert _gates(conn, pid)[port.GATE_HUMAN] is False
+    guard.approve(conn, pid, port.pending_reviews(conn, pid), channel="cli-tty", approved_by="tester")
+    st = port.status_(conn, pid)
+    assert st["gates"][port.GATE_HUMAN] is True and st["complete"], st["gates"]
+    # 승인 뒤에도 값이 기대와 다르면 실패 (승인은 '이 값이 맞다'에 대한 것)
+    (target / "calc2.py").write_text(changed.replace("'count': 0", "'count': 9"), encoding="utf-8")
+    v2 = port.verify(conn, proj, settings, pid, target_cli=f"{PY} calc2.py")
+    assert v2["failed"] == 2 and {f["name"] for f in v2["failures"]} == {"two", "none"}  # 기대값·원본 둘 다 어긋남
+
+
+def test_new_case_requires_expectation(tmp_path):
+    cf = tmp_path / "c.json"
+    cf.write_text(json.dumps({"cases": [{"name": "x", "new": True, "argv": []}]}), encoding="utf-8")
+    with pytest.raises(ToolError):
+        port._load_cases(cf)
+    cf.write_text(json.dumps({"cases": [{"name": "x", "argv": [], "expect": {"nope": 1}}]}), encoding="utf-8")
+    with pytest.raises(ToolError):
+        port._load_cases(cf)

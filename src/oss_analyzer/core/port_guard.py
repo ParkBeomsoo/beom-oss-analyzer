@@ -221,6 +221,13 @@ def reviews(conn, port_id: str, last_diff: dict | None, last_capture: dict | Non
         fp = _sha({"item": r["item_id"], "label": r["label"], "note": r["note"]})
         items.append({"item_id": r["item_id"], "kind": "omitted", "fingerprint": fp,
                       "summary": f"생략: {r['label']} — 사유: {r['note']}", "proposed_by": r["actor"]})
+    for name, ex in sorted(((last_capture or {}).get("detail", {}).get("expectations") or {}).items()):
+        fp = _sha({"name": name, **ex})
+        src = ex["source"]
+        was = "원본에 없음(새 동작)" if ex["new"] else f"원본 status {src['status']} {src['body']}"
+        items.append({"item_id": f"expect:{name}", "kind": "expectation", "fingerprint": fp,
+                      "summary": f"기대값 '{name}' — {'원본에 없는 새 동작' if ex['new'] else '원본과 다르게'}",
+                      "detail": [{"case": name, "diff": f"{was[:200]} → 기대 {json.dumps(ex['expect'], ensure_ascii=False)[:200]}"}]})
     change = (last_capture or {}).get("detail", {}).get("change") if last_capture else None
     if change:
         fp = _sha(change)
@@ -249,7 +256,7 @@ def render(items: list[dict]) -> str:
     lines = []
     for i, it in enumerate(items, 1):
         lines.append(f"{i}. [{it['kind']}] {it['summary']}")
-        if it["kind"] == "divergence":
+        if it["kind"] in ("divergence", "expectation"):
             lines += [f"     - {d['case']}: {d['diff']}" for d in it["detail"]]
         elif it["kind"] == "case_change":
             d = it["detail"]
