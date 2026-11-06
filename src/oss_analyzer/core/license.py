@@ -167,7 +167,7 @@ SPLIT_RE = re.compile(r"(?i)\b(?:part|parts|portions?|some files)\s+of\s+this\s+
 
 def _split_root(proj: dict, findings: list[dict]) -> None:
     """루트 LICENSE 가 '일부는 제한 라이선스(별도 파일), 나머지는 허용형(별도 파일)' 이라고 말하면
-    기본은 허용형, 제한 라이선스는 헤더로 표시된 파일에만 (scope=marked) 적용한다. 예: meilisearch MIT + BUSL-1.1(EE)."""
+    기본은 허용형, 제한 라이선스는 헤더로 표시된 파일에만 (scope=marked) 적용한다. 예: 저장소 전체 MIT + 일부 디렉터리만 BUSL-1.1."""
     root_text = [fd for fd in findings if fd["scope"] == "dir:" and fd["source"] == "text"]
     main = next((fd for fd in root_text if re.fullmatch(r"(?i)(licen[cs]e|copying)(\.(md|txt))?", PurePosixPath(fd["path"]).name)), None)
     if main is None:

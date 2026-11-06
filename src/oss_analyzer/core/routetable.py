@@ -1,7 +1,7 @@
 """라우트 표 매크로 해석 — `"경로" => verb(handler)` / `[verb(h), ...]` / `sub(하위표)` 형태의 선언형 라우팅.
 
-예) Meilisearch 의 #[routes::routes(routes("/keys" => sub(api_key::ApiKeyApi), "" => [get(list), post(create)]))]
-    pub struct MeilisearchApi;
+예) #[routes::routes(routes("/keys" => sub(api_key::ApiKeyApi), "" => [get(list), post(create)]))]
+    pub struct RootApi;
 
 - 표마다 '주인'(바로 뒤의 struct/fn/mod 이름)을 기록하고, sub(X) 는 X 표를 그 경로 아래에 마운트한다.
 - macro_rules! 본문 안의 표에서 `$( $route => [...] ),*` 반복은 그 매크로 호출부의

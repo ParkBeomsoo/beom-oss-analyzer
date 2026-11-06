@@ -1,4 +1,4 @@
-"""선언형 라우트 표 매크로 (Meilisearch 형태) · 매니페스트 기반 프레임워크 감지 · 테스트 데이터 분류."""
+"""선언형 라우트 표 매크로 (중첩 sub() 형태) · 매니페스트 기반 프레임워크 감지 · 테스트 데이터 분류."""
 from pathlib import Path
 
 from oss_analyzer.adapters.astgrep import detect

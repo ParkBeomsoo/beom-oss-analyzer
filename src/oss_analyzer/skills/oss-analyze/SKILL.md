@@ -6,7 +6,7 @@ description: >-
   oss-analyzer MCP 도구(oss_*) 또는 같은 기능의 CLI(`oss-analyzer`)를 사용한다.
   "이 오픈소스 전부 분석해줘", "어떤 기능이 있는지 다 파악해줘", "커스텀하기 전에 구조 다 뜯어봐줘",
   "빠진 거 없이 분석", "전수 분석", "oss 분석", "툴킷 써서 옮겨줘/포팅해줘" 같은 요청에 사용한다.
-  대략적인 요약만 필요하면 이 스킬 대신 그냥 읽고 답한다. 소스 없는 바이너리 분석은 REA 같은 도구를 쓴다.
+  대략적인 요약만 필요하면 이 스킬 대신 그냥 읽고 답한다. 소스 없는 바이너리 분석은 바이너리 리버스 엔지니어링 도구를 쓴다.
 ---
 
 # 오픈소스 전수 분석 절차
@@ -105,7 +105,11 @@ oss_unit_next(agent) → oss_unit_context(unit_id, agent) [next_offset 이 있�
      `adequacy.not_executed`·`untested_lines` 가 남으면 그 분기를 거치는 케이스를 추가한다.
 4. 대상 구현 → `oss_port_map`(ported 는 내 코드 '경로:줄', omitted·replaced 는 사유) → `oss_port_verify`(`concurrency` 로 동시 요청까지).
    - 생성 케이스 실패는 `failures_by_origin` 으로 묶어 원인별로 보고. `target_crashes` 는 대상이 그 입력에서 죽은 것.
-   - 원본과 다르게 두는 게 맞는 차이는 `oss_port_accept`(사유 필수)로 **제안**만 한다. 생략(omitted)과
+   - **일부러 바꿔서 가져오는 동작**은 그 케이스에 `expect`(기대값)를 적는다 — 원본 대신 기대값과 비교하므로
+     "다르다"가 아니라 "바꾼 값이 맞다"까지 검증된다. 원본에 없는 새 동작은 `new: true` + `expect`.
+     기대값은 사용자가 원하는 동작을 말해 준 대로 적고, 대상 코드의 출력을 그대로 베껴 기대값으로 만들지 않는다.
+     기대값도 사용자 승인 대상이다 (원본 응답과 기대값을 나란히 보여 준다).
+   - 값까지 정할 수 없는 차이(형식만 다름 등)는 `oss_port_accept`(사유 필수)로 **제안**만 한다. 생략(omitted)과
      capture 사이의 케이스 삭제·변경도 같다 — 모두 사용자 승인 전까지 게이트 미충족.
    - 원본을 계측할 수 없으면(릴리스 빌드 바이너리 등) `target_coverage_report`(+`target_coverage_cmd`)로 대상 커버리지를 잰다.
    - 대상 코드를 고친 뒤 `broken_targets` 에 `moved_to` 가 있으면 `oss_port_map(follow=True)`.
@@ -118,7 +122,7 @@ oss_unit_next(agent) → oss_unit_context(unit_id, agent) [next_offset 이 있�
 
 **포팅 게이트** (전부 충족해야 `oss_port_finish` 발급): 매핑 완료 · ported 위치/줄 내용 그대로 ·
 차등 검증 통과(마지막 capture 케이스 전부, **검증 뒤 대상 코드가 바뀌면 무효**) · 케이스 충분성(원본 또는 대상 커버리지) ·
-사람 승인(차이 허용·생략·케이스 변경, **승인 뒤 내용이 바뀌면 무효**) · 기록 무결 · 라이선스.
+사람 승인(차이 허용·생략·케이스 변경·기대값, **승인 뒤 내용이 바뀌면 무효**) · 기록 무결 · 라이선스.
 
 ## 5. 마무리
 

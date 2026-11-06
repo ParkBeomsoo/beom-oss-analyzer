@@ -55,7 +55,7 @@ def _rust_toolchain() -> tuple[str | None, str | None]:
     """(rust-analyzer 실제 바이너리 경로, 그 툴체인 이름).
 
     분석 대상이 rust-toolchain.toml 로 툴체인을 고정하면, 저장소 안에서 실행한 rustup shim 은 그 툴체인으로
-    바뀌는데 거기엔 rust-analyzer 가 없을 수 있다 → 서버가 즉시 죽는다 (Meilisearch 에서 실제 발생).
+    바뀌는데 거기엔 rust-analyzer 가 없을 수 있다 → 서버가 즉시 죽는다 (실제 저장소에서 발생).
     또 rustup 이 그 툴체인을 자동으로 내려받으려 할 수 있다. 그래서 홈 디렉터리 기준 툴체인을 고정해 쓴다.
     """
     rustup = shutil.which("rustup")

@@ -165,7 +165,7 @@ def build(conn, settings: Settings, project: dict, rebuild: bool = False) -> dic
                 unknowns.record(conn, question=f"소스 없는 바이너리 {f['path']} 의 역할·동작", domain="binary", scope=f["path"],
                                 severity="high", required_level=L0, origin="inventory",
                                 recommended_probes=[{"operation": "build_script_trace", "rationale": "빌드 스크립트·로더 코드에서 사용처 추적"},
-                                                    {"operation": "rea_handoff", "rationale": "배포물 분석 도구(REA)로 넘김 (4단계)"}])
+                                                    {"operation": "rea_handoff", "rationale": "바이너리 분석 도구로 넘김"}])
         for lang in sorted(languages):
             if not caps["engines"].get(f"lsp:{lang}"):
                 unknowns.record(conn, question=f"{lang} 코드는 LSP 를 쓸 수 없어 호출 관계를 정밀 검증할 수 없음 ({caps['reasons'].get(f'lsp:{lang}')})",

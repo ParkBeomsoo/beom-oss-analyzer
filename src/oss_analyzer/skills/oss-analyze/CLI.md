@@ -117,5 +117,8 @@ oss-analyzer port-finish <pid> <port_id>                    # 게이트 전부 �
 에이전트는 `port-approve` 를 실행하지 않는다 (`--list` 로 대기 목록 보기만). 승인은 사람이 MCP 확인 창이나 터미널에서 직접.
 
 케이스 JSON: `{"defaults": {...}, "cases": [{"name", "method", "path", "json"?, "headers"?, "ignore"?: [점 경로], "match"?: {점 경로: 정규식}, "compare"?: "full"|"status"} | {"name", "argv", "stdin"?} | {"name", "call": {"source": "app/x.py:fn", "target": "src/x.js:fn" 또는 {"cmd": "..."}}, "args"?, "kwargs"?, "runtime"?: {"source": "python 경로", "target": "node"}}]}`.
+바꿔서 가져오는 경우 — 케이스에 `"expect": {status?, body?, equals?: {점 경로: 값}, match?: {점 경로: 정규식}}` 를 주면
+원본 대신 이 기대값과 비교한다 (배열은 `items.0.price`). 원본에 없는 새 동작은 `"new": true` + `expect` (원본에서는 돌리지 않음).
+기대값은 capture 때 원장에 기록되고 사용자 승인 대상이다. 기대값 케이스는 입력 변형을 만들지 않는다.
 케이스에 `"explore": false` 면 변형 대상에서 빼고, `"concurrent": false` 면 동시 요청에서 뺀다. `match` 경로는 양쪽 다 없으면 같다고 본다(오류 응답).
 앞 케이스 결과는 `{{이름.필드}}` 로 참조 (예: 생성한 주문 id 로 조회).

@@ -1,8 +1,5 @@
-oss-analyzer
-Copyright 2026 ParkBeomsoo
+beom-oss-analyzer
+Copyright (c) 2026 ParkBeomsoo. All rights reserved.
+Licensed under the beom-oss-analyzer Use License (use permitted, no modification) — see LICENSE.
 
-This product includes software developed by ParkBeomsoo.
-
-Design of the Evidence and ResidualUnknown records is adapted from
-REA (https://github.com/morluto/rea), licensed under the MIT License.
 See THIRD_PARTY.md for third-party components and their licenses.

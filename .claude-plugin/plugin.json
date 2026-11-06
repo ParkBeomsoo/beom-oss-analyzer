@@ -7,7 +7,7 @@
     "url": "https://github.com/ParkBeomsoo"
   },
   "repository": "https://github.com/ParkBeomsoo/beom-oss-analyzer",
-  "license": "Apache-2.0",
+  "license": "LicenseRef-beom-oss-analyzer-use-only",
   "keywords": ["source-analysis", "porting", "differential-testing", "mcp-server"],
   "skills": "./src/oss_analyzer/skills",
   "mcpServers": {

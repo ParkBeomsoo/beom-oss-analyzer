@@ -1,7 +1,7 @@
-"""미확인(Unknown) — REA 의 ResidualUnknown 구조를 재구현하고 '요구 등급 강제'를 추가.
+"""미확인(Unknown) — 확정 못 한 질문과 '해결에 필요한 근거 등급'을 기록.
 
 - 상태: open / investigating / blocked / contradicted / resolved
-- 해결(resolved)은 required_level 이상인 근거가 1개 이상 있어야만 가능 (REA 는 미강제)
+- 해결(resolved)은 required_level 이상인 근거가 1개 이상 있어야만 가능
 - 'withdrawn' / 'out-of-scope' 로 닫을 때도 사유가 필수
 - 갱신은 expected_revision 으로 낙관적 잠금 → 동시에 고치면 revision_conflict
 """

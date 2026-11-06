@@ -32,7 +32,7 @@ def mask_line(line: str, code: bool = False) -> tuple[str, bool]:
     """code=True(소스 코드)면 따옴표로 감싼 문자열 값만 비밀로 본다.
 
     코드에는 `token: &str`, `let secret = derive_key(..)`, `jsonwebtoken::errors::Error` 처럼 비밀 단어가 들어간
-    타입·식별자가 흔해서, 따옴표 없는 값까지 가리면 코드를 읽을 수 없게 된다 (Meilisearch 인증 코드에서 실제 발생).
+    타입·식별자가 흔해서, 따옴표 없는 값까지 가리면 코드를 읽을 수 없게 된다 (실제 인증 코드에서 발생).
     """
     if PEM_RE.search(line):
         return "<개인키 블록 — 가림>", True

@@ -8,12 +8,6 @@
 | multilspy (Microsoft) | MIT | 언어 서버 제어 |
 | PyYAML | MIT | 규칙팩 읽기 |
 
-## 설계 차용
-
-| 출처 | 라이선스 | 범위 |
-|---|---|---|
-| REA (morluto/rea) | MIT | Evidence / ResidualUnknown 레코드 구조, 페이징 규약 (코드 복사 없이 구조만 재구현) |
-
 ## 외부 엔진 (사용자가 별도 설치, 서브프로세스로만 호출, 재배포하지 않음)
 
 | 엔진 | 라이선스 | 용도 |

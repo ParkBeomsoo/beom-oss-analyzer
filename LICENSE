@@ -1,202 +1,58 @@
+beom-oss-analyzer 사용 라이선스 — 사용 허용, 수정 금지 (버전 1.0)
 
-                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
+Copyright (c) 2026 ParkBeomsoo. All rights reserved.
 
-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+이 라이선스는 이 저장소의 소프트웨어(소스 코드, 스킬·문서, 규칙팩, 플러그인 파일 포함, 이하 "소프트웨어")에
+적용된다. 이 라이선스에서 명시적으로 허용하지 않은 모든 권리는 저작자에게 있다.
 
-   1. Definitions.
+1. 허용되는 사용
+   (가) 누구나 소프트웨어를 수정하지 않은 상태로 설치·실행·사용할 수 있다. 개인 용도, 회사 업무,
+        상업적 목적을 모두 포함한다.
+   (나) 사용자가 소프트웨어로 만든 결과물(분석 리포트, 원장 데이터, 포팅·검증한 사용자 자신의 코드 등)은
+        사용자의 것이며, 이 라이선스는 그 결과물에 어떤 제한도 두지 않는다.
+   (다) 수정하지 않은 사본을 이 라이선스 전문과 저작권 표시를 포함한 채 무상으로 재배포할 수 있다.
+        GitHub 이용약관에 따른 포크(사본 생성)도 같은 조건이다.
 
-      "License" shall mean the terms and conditions for use, reproduction,
-      and distribution as defined by Sections 1 through 9 of this document.
+2. 금지되는 행위 (저작자의 서면 허락이 없는 경우)
+   (가) 소프트웨어 또는 그 일부를 수정·번역·개작하거나 2차 저작물을 만드는 것
+   (나) 수정한 소프트웨어나 2차 저작물을 배포·공개하거나, 이를 이용해 서비스를 제공하는 것
+   (다) 소프트웨어의 코드 일부를 다른 소프트웨어에 포함하는 것
+   (라) 저작권·라이선스 표시를 지우거나 바꾸는 것
+   (마) 소프트웨어를 유료로 판매하거나 대가를 받고 재배포하는 것
 
-      "Licensor" shall mean the copyright owner or entity authorized by
-      the copyright owner that is granting the License.
+3. 개선 제안
+   이 저장소에 이슈나 풀 리퀘스트로 제출하기 위한 목적에 한해 수정할 수 있다. 제출한 사람은 제출한 내용을
+   저작자가 이 라이선스 또는 저작자가 정하는 다른 조건으로 사용·배포할 수 있도록 허락한 것으로 본다.
+   반영 여부는 저작자가 결정한다.
 
-      "Legal Entity" shall mean the union of the acting entity and all
-      other entities that control, are controlled by, or are under common
-      control with that entity. For the purposes of this definition,
-      "control" means (i) the power, direct or indirect, to cause the
-      direction or management of such entity, whether by contract or
-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
-      outstanding shares, or (iii) beneficial ownership of such entity.
+4. 제3자 구성요소
+   소프트웨어가 사용하는 라이브러리·외부 도구는 각자의 라이선스를 따른다 (THIRD_PARTY.md, NOTICE).
 
-      "You" (or "Your") shall mean an individual or Legal Entity
-      exercising permissions granted by this License.
+5. 보증 없음·책임 제한
+   소프트웨어는 "있는 그대로" 제공되며, 상품성·특정 목적 적합성·권리 비침해를 포함한 어떤 보증도 하지 않는다.
+   저작자는 소프트웨어의 사용 또는 사용 불능으로 생긴 어떤 손해에도 책임지지 않는다.
 
-      "Source" form shall mean the preferred form for making modifications,
-      including but not limited to software source code, documentation
-      source, and configuration files.
+6. 종료
+   이 라이선스를 위반하면 허락받은 권리는 자동으로 끝난다.
 
-      "Object" form shall mean any form resulting from mechanical
-      transformation or translation of a Source form, including but
-      not limited to compiled object code, generated documentation,
-      and conversions to other media types.
+7. 해석
+   이 라이선스는 한국어 본문을 기준으로 해석한다. 아래 영어 요약은 이해를 돕기 위한 것이다.
+   별도 허락 문의: https://github.com/ParkBeomsoo
 
-      "Work" shall mean the work of authorship, whether in Source or
-      Object form, made available under the License, as indicated by a
-      copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
+---------------------------------------------------------------------------------------------------
 
-      "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
-      editorial revisions, annotations, elaborations, or other modifications
-      represent, as a whole, an original work of authorship. For the purposes
-      of this License, Derivative Works shall not include works that remain
-      separable from, or merely link (or bind by name) to the interfaces of,
-      the Work and Derivative Works thereof.
+beom-oss-analyzer Use License — Use permitted, no modification (version 1.0), English summary
 
-      "Contribution" shall mean any work of authorship, including
-      the original version of the Work and any modifications or additions
-      to that Work or Derivative Works thereof, that is intentionally
-      submitted to Licensor for inclusion in the Work by the copyright owner
-      or by an individual or Legal Entity authorized to submit on behalf of
-      the copyright owner. For the purposes of this definition, "submitted"
-      means any form of electronic, verbal, or written communication sent
-      to the Licensor or its representatives, including but not limited to
-      communication on electronic mailing lists, source code control systems,
-      and issue tracking systems that are managed by, or on behalf of, the
-      Licensor for the purpose of discussing and improving the Work, but
-      excluding communication that is conspicuously marked or otherwise
-      designated in writing by the copyright owner as "Not a Contribution."
+Copyright (c) 2026 ParkBeomsoo. All rights reserved.
 
-      "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by Licensor and
-      subsequently incorporated within the Work.
-
-   2. Grant of Copyright License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      copyright license to reproduce, prepare Derivative Works of,
-      publicly display, publicly perform, sublicense, and distribute the
-      Work and such Derivative Works in Source or Object form.
-
-   3. Grant of Patent License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      (except as stated in this section) patent license to make, have made,
-      use, offer to sell, sell, import, and otherwise transfer the Work,
-      where such license applies only to those patent claims licensable
-      by such Contributor that are necessarily infringed by their
-      Contribution(s) alone or by combination of their Contribution(s)
-      with the Work to which such Contribution(s) was submitted. If You
-      institute patent litigation against any entity (including a
-      cross-claim or counterclaim in a lawsuit) alleging that the Work
-      or a Contribution incorporated within the Work constitutes direct
-      or contributory patent infringement, then any patent licenses
-      granted to You under this License for that Work shall terminate
-      as of the date such litigation is filed.
-
-   4. Redistribution. You may reproduce and distribute copies of the
-      Work or Derivative Works thereof in any medium, with or without
-      modifications, and in Source or Object form, provided that You
-      meet the following conditions:
-
-      (a) You must give any other recipients of the Work or
-          Derivative Works a copy of this License; and
-
-      (b) You must cause any modified files to carry prominent notices
-          stating that You changed the files; and
-
-      (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, patent, trademark, and
-          attribution notices from the Source form of the Work,
-          excluding those notices that do not pertain to any part of
-          the Derivative Works; and
-
-      (d) If the Work includes a "NOTICE" text file as part of its
-          distribution, then any Derivative Works that You distribute must
-          include a readable copy of the attribution notices contained
-          within such NOTICE file, excluding those notices that do not
-          pertain to any part of the Derivative Works, in at least one
-          of the following places: within a NOTICE text file distributed
-          as part of the Derivative Works; within the Source form or
-          documentation, if provided along with the Derivative Works; or,
-          within a display generated by the Derivative Works, if and
-          wherever such third-party notices normally appear. The contents
-          of the NOTICE file are for informational purposes only and
-          do not modify the License. You may add Your own attribution
-          notices within Derivative Works that You distribute, alongside
-          or as an addendum to the NOTICE text from the Work, provided
-          that such additional attribution notices cannot be construed
-          as modifying the License.
-
-      You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
-
-   5. Submission of Contributions. Unless You explicitly state otherwise,
-      any Contribution intentionally submitted for inclusion in the Work
-      by You to the Licensor shall be under the terms and conditions of
-      this License, without any additional terms or conditions.
-      Notwithstanding the above, nothing herein shall supersede or modify
-      the terms of any separate license agreement you may have executed
-      with Licensor regarding such Contributions.
-
-   6. Trademarks. This License does not grant permission to use the trade
-      names, trademarks, service marks, or product names of the Licensor,
-      except as required for reasonable and customary use in describing the
-      origin of the Work and reproducing the content of the NOTICE file.
-
-   7. Disclaimer of Warranty. Unless required by applicable law or
-      agreed to in writing, Licensor provides the Work (and each
-      Contributor provides its Contributions) on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-      implied, including, without limitation, any warranties or conditions
-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-      PARTICULAR PURPOSE. You are solely responsible for determining the
-      appropriateness of using or redistributing the Work and assume any
-      risks associated with Your exercise of permissions under this License.
-
-   8. Limitation of Liability. In no event and under no legal theory,
-      whether in tort (including negligence), contract, or otherwise,
-      unless required by applicable law (such as deliberate and grossly
-      negligent acts) or agreed to in writing, shall any Contributor be
-      liable to You for damages, including any direct, indirect, special,
-      incidental, or consequential damages of any character arising as a
-      result of this License or out of the use or inability to use the
-      Work (including but not limited to damages for loss of goodwill,
-      work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor
-      has been advised of the possibility of such damages.
-
-   9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, You may choose to offer,
-      and charge a fee for, acceptance of support, warranty, indemnity,
-      or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, You may act only
-      on Your own behalf and on Your sole responsibility, not on behalf
-      of any other Contributor, and only if You agree to indemnify,
-      defend, and hold each Contributor harmless for any liability
-      incurred by, or claims asserted against, such Contributor by reason
-      of your accepting any such warranty or additional liability.
-
-   END OF TERMS AND CONDITIONS
-
-   APPENDIX: How to apply the Apache License to your work.
-
-      To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
-      replaced with your own identifying information. (Don't include
-      the brackets!)  The text should be enclosed in the appropriate
-      comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
-      same "printed page" as the copyright notice for easier
-      identification within third-party archives.
-
-   Copyright [yyyy] [name of copyright owner]
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
+- You may install, run and use the unmodified Software for any purpose, including internal business and
+  commercial use. Output you create with the Software (reports, ledger data, your own ported code) is yours.
+- You may redistribute unmodified copies free of charge, with this license and the copyright notice intact.
+- Without the author's written permission you may NOT modify, translate or adapt the Software, create
+  derivative works, distribute or offer services based on modified versions, incorporate any part of its code
+  into other software, remove notices, or sell it.
+- Modifications made solely to submit an issue or pull request to this repository are permitted; submissions
+  may be used and distributed by the author under this or other terms.
+- Third-party components keep their own licenses (THIRD_PARTY.md, NOTICE).
+- NO WARRANTY. The author is not liable for any damages. Rights terminate automatically on violation.
+- The Korean text above governs.
