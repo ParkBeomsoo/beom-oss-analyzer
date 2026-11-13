@@ -65,7 +65,7 @@ def oss_activity(text: str) -> dict:
 
 
 @mcp.tool()
-def oss_plan_set(steps: list[dict], summary: str = "") -> dict:
+def oss_plan_set(steps: list[dict], summary: str = "", design: str = "") -> dict:
     """구현 계획을 낸다 — 사용자가 앱에서 승인한 뒤 구현한다. steps: [{title, files?: [...], commands?: [...], requirements?: ["R1"]}].
     계획을 다시 내면 이전 승인은 풀린다."""
     clean = [{"title": str(s.get("title", "")).strip()[:200], "files": [str(f) for f in s.get("files") or []][:20],
@@ -78,7 +78,7 @@ def oss_plan_set(steps: list[dict], summary: str = "") -> dict:
         old = r.get("plan") or {}
         history = (old.get("history") or []) + ([{"steps": old["steps"], "summary": old.get("summary")}] if old.get("steps") else [])
         r["plan"] = {"steps": clean, "summary": summary.strip()[:1000], "approved": False, "history": history[-5:],
-                     "at": inbox._now()}
+                     "at": inbox._now(), **({"design": design.strip()[:6000]} if design.strip() else {})}
     out = _update(put)
     if out["ok"]:
         inbox.log(settings, os.environ["OSS_ANALYZER_RUN"], "plan", steps=len(clean))

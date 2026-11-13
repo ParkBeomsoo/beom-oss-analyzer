@@ -130,6 +130,16 @@ pipx uninstall beom-oss-analyzer
 
 ## Desktop app and automatic runs
 
+**Windows** (PowerShell) — installs the app and asks whether to add Start menu and desktop shortcuts:
+
+```powershell
+irm https://raw.githubusercontent.com/ParkBeomsoo/beom-oss-analyzer/main/install.ps1 | iex
+```
+
+**macOS · Linux**: `curl -fsSL https://raw.githubusercontent.com/ParkBeomsoo/beom-oss-analyzer/main/install.sh | sh`
+
+Or by hand:
+
 ```bash
 pipx install "beom-oss-analyzer[app] @ git+https://github.com/ParkBeomsoo/beom-oss-analyzer.git"
 beom-oss-analyzer                    # open the app
@@ -144,6 +154,12 @@ The first time you open the app it also offers to create the shortcuts. On Linux
 |---|---|---|
 | **Request based** | Build a feature like this (no original to follow) | requirements → acceptance criteria → plan → build → verify → handoff |
 | **Open-source based** | Bring a feature of a repository into my project | analyze → scope → record original → plan → build → compare → handoff |
+| **Planning** | Turn an idea into a spec document quickly | a few questions → spec → refine → *Build from this spec* |
+| **Free chat** | Use Claude Code or Codex directly, without this process | message → work → message … |
+
+**Attachments** — attach spec documents or links to any request: md · txt · pdf · images, and Word · PowerPoint · Excel · HWPX
+(converted to text alongside the original). Public web pages are saved as text; pages behind a login (e.g. Confluence) are passed
+as links — export them to a file for a sure result. The agent reads them first.
 
 In open-source mode only the repository URL (or path) is required. Describe the feature in the text box, or leave it empty —
 the agent then lists the repository's features and asks you to pick one.
@@ -172,7 +188,8 @@ environment variable, billed per use) — both can do the same things.
 
 **What you decide** — only these appear as cards:
 
-- **Requirements and acceptance criteria**, then the **plan**: *Approve*, *Edit* (change requirements, cases or plan steps yourself, then
+- **Once at the start**: requirements, acceptance criteria, the plan and (for screens) the design direction appear together — approve them
+  once and the run goes on until every completion condition is met. Per card: *Approve*, *Edit* (change requirements, cases or plan steps yourself, then
   *Save and approve* — recorded in the ledger as written by you and passed on to the agent), or type a correction in the message box
   (the agent revises without approval).
 - The agent's **questions** and **permission requests** (`Y` allow · `N` refuse).
@@ -189,8 +206,13 @@ Approvals are written to the ledger inside the app only, bound to exactly what w
 | Checks | what was verified — per requirement, each case's input → expected → actual result, and what every completion condition means |
 | Changes | changed files and diffs, per-file revert, checkpoints (the target folder is snapshotted every round; restore any point) |
 
-**Rounds** — one round is one agent session. A typical request takes 4–6 rounds (more with questions or revisions); the default limit
-is 8. A run that makes no progress for two rounds stops by itself, and you can always continue with a message, so the limit is only a cost cap.
+**Rounds** — a round is one agent session; the runner keeps going round after round until every completion condition is met.
+There is no limit by default: a run that makes no progress for two rounds stops by itself. You can set a limit under *Options*, or
+choose *confirm once at the end* to have it build and verify before you look at anything.
+
+**Screens and design** — for work with a UI the plan carries a design direction (tone, colors, type, references, what to avoid) that you
+approve with the criteria, and agents follow design rules that avoid the generic "AI look". Screen cases open the page in a real browser
+engine, check required text, elements and script errors, and keep a screenshot you can open in the Checks tab.
 
 **Where data lives** — everything stays on your computer. See [Data and storage](#data-and-storage).
 
@@ -348,6 +370,8 @@ To verify the modified original against the unmodified one, use the modified rep
 | `compare: "status"` | compare the status code only |
 | `expect` | compare with an expected value instead of the original — `status`·`body`·`equals` (path: value, arrays as `items.0.price`)·`match` |
 | `new: true` | behavior not in the original (`expect` required; not run against the original) |
+| `screen: {path \| file, mobile}` · `expect: {visible, selectors, no_errors}` | screen case — opens the page, checks text, elements and script errors, keeps a screenshot |
+| `description` | what the case checks, in plain words — shown instead of the name |
 | `explore: false`·`concurrent: false` | exclude from automatic input variation / concurrency checks |
 
 Keys outside this table are rejected when the file is saved (a misspelled key such as `args` instead of `argv` would otherwise run the case with different input). In request mode every case also needs `req`.

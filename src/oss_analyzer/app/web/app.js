@@ -2,7 +2,7 @@
 // 화면 상태와 그리기. 데이터는 Qt WebChannel 로 같은 프로세스의 툴킷(Api)에서만 받는다.
 let api = null;
 const S = { runs: [], agents: [], kinds: {}, policy: {}, current: null, detail: null, tab: "progress", mode: "request",
-  draft: { request: "", target_root: "", context_dir: "", source: "", feature: "", agent: "claude", model: "", effort: "", max_rounds: 8,
+  draft: { request: "", target_root: "", context_dir: "", source: "", feature: "", agent: "claude", model: "", effort: "", max_rounds: 0, confirm_at: "start",
            auth: "subscription", plan_approval: true, policy: null }, permModes: [], preparing: false,
   changes: null, file: null, sig: { feed: "", right: "", side: "" }, startedAt: null };
 
@@ -51,6 +51,7 @@ const ICONS = {
   chip: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/>',
   agent: '<rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01"/>',
   play: '<path d="M8 5.5v13l11-6.5z"/>',
+  clip: '<path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L13 4a3.3 3.3 0 0 1 4.7 4.7L9.2 17.2a1.7 1.7 0 0 1-2.4-2.4L14.5 7"/>',
   gauge: '<path d="M4.5 16a7.5 7.5 0 1 1 15 0"/><path d="m12 16 3.5-4"/>',
   book: '<path d="M5 4.5h9.5A2.5 2.5 0 0 1 17 7v12.5H7.5A2.5 2.5 0 0 1 5 17z"/><path d="M5 17a2.5 2.5 0 0 1 2.5-2.5H17"/>',
 };
@@ -99,9 +100,17 @@ function modeOf(policy) {
   return m ? m.id : "custom";
 }
 const modeLabel = (policy) => { const id = modeOf(policy); return id === "custom" ? "직접 설정" : S.permModes.find((m) => m.id === id).label; };
+// 고르지 않았을 때 실제로 쓰이는 값 — 에이전트 설정 파일, 없으면 최근에 실제로 쓴 모델 (agents.current)
+function currentOf(agentId) { const a = S.agents.find((x) => x.id === agentId); return (a && a.current) || {}; }
+function modelName(agentId, id) {
+  const a = S.agents.find((x) => x.id === agentId), m = a && (a.models || []).find((x) => x.id === id);
+  if (m && m.id) return m.label;
+  return id ? id.replace(/^claude-/, "").replace(/-(\d+)-(\d+)$/, " $1.$2") : "";
+}
 function modelLabel(agentId, model) {
-  const a = S.agents.find((x) => x.id === agentId), m = a && (a.models || []).find((x) => x.id === (model || ""));
-  return m ? (m.id ? m.label : "기본 모델") : (model || "기본 모델");
+  if (model) return modelName(agentId, model);
+  const cur = currentOf(agentId);
+  return cur.model ? modelName(agentId, cur.model) : "에이전트 설정";
 }
 // 에이전트 · 모델 · 권한 메뉴 — 홈 초안과 실행 중 설정이 같은 메뉴를 쓴다 (get: 현재 값, set: 바꾸기)
 function agentMenu(anchor, cur, set) {
@@ -122,7 +131,8 @@ function effortLevels(agentId, model) {
   return a.efforts[model || ""] || a.efforts[""] || [];
 }
 function effortLabel(agentId, model, effort) {
-  if (!effort) return "기본 노력";
+  if (!effort) { const cur = currentOf(agentId), lv = cur.effort && effortLevels(agentId, model || cur.model).find((x) => x.id === cur.effort);
+    return lv ? `노력 ${lv.label}` : "노력 자동"; }
   const l = effortLevels(agentId, model).find((x) => x.id === effort); return l ? `노력 ${l.label}` : `노력 ${effort}`;
 }
 function effortMenu(anchor, agentId, model, cur, set) {
@@ -133,7 +143,8 @@ function effortMenu(anchor, agentId, model, cur, set) {
 }
 // 에이전트 · 모델 · 노력을 한 메뉴에서 (Claude 데스크톱의 모델 고르기처럼)
 function brainLabel(agentId, model, effort) {
-  const lv = effortLevels(agentId, model).find((x) => x.id === effort);
+  const cur = currentOf(agentId), eff = effort || cur.effort;
+  const lv = effortLevels(agentId, model || cur.model).find((x) => x.id === eff);
   return [agentName(agentId), modelLabel(agentId, model), lv ? lv.label : null].filter(Boolean).join(" · ");
 }
 function brainPop(anchor, cur, set, allowAgent) {
@@ -148,17 +159,25 @@ function brainPop(anchor, cur, set, allowAgent) {
       allowAgent ? h("div", { class: "pt", text: "에이전트" }) : null,
       allowAgent ? h("div", { class: "agrid" }, ...S.agents.filter((x) => x.exe || x.id === "claude").map((x) =>
         h("button", { class: "ag" + (x.id === c.agent ? " on" : "") + (x.ready ? "" : " off"), title: x.hint || x.note || "",
-          onclick: (e) => { e.stopPropagation(); set({ agent: x.id, model: "", effort: "" }); draw(); } },
-          h("b", { text: x.name.replace(" (실험적)", "") }), h("i", { text: x.ready ? "연결됨" : x.exe ? "로그인 필요" : "설치 필요" })))) : null,
+          onclick: (e) => { e.stopPropagation(); S.agentPicked = true; set({ agent: x.id, model: "", effort: "" }); draw(); } },
+          h("b", { text: x.name.replace(" (실험적)", "") }), h("i", { text: x.ready ? "연결됨" : x.ready === null && x.exe ? "확인 중" : x.exe ? "로그인 필요" : "설치 필요" })))) : null,
       h("div", { class: "pt", text: "모델" }),
-      ...(a.models || [{ id: "", label: "기본값" }]).map((m) => h("button", { class: "pi" + ((c.model || "") === m.id ? " on" : ""),
-        onclick: (e) => { e.stopPropagation(); const keep = effortLevels(c.agent, m.id).some((l) => l.id === c.effort); set({ model: m.id, ...(keep ? {} : { effort: "" }) }); draw(); } },
-        h("span", { class: "pl" }, h("b", { text: m.id ? m.label : "기본 모델" }), h("i", { text: m.note || (m.id ? "" : "에이전트 설정") })),
-        (c.model || "") === m.id ? ico("check", "ck") : null)),
+      ...(() => {
+        const cur = currentOf(c.agent), inUse = c.model || cur.model || "";
+        const list = (a.models || []).filter((m) => m.id);
+        if (inUse && !list.some((m) => m.id === inUse)) list.unshift({ id: inUse, label: modelName(c.agent, inUse) });
+        return list.map((m) => h("button", { class: "pi" + (inUse === m.id ? " on" : ""),
+          onclick: (e) => { e.stopPropagation(); const keep = effortLevels(c.agent, m.id).some((l) => l.id === c.effort); set({ model: m.id, ...(keep ? {} : { effort: "" }) }); draw(); } },
+          h("span", { class: "pl" }, h("b", { text: m.label }),
+            h("i", { text: !c.model && m.id === cur.model ? `현재 · ${cur.source || "설정"}` : (m.note || "") })),
+          inUse === m.id ? ico("check", "ck") : null));
+      })(),
       h("div", { class: "pf" }, custom),
       levels.length ? h("div", { class: "pt sub2", text: "노력 — 얼마나 깊이 생각할지" }) : null,
-      levels.length ? h("div", { class: "effrow" }, segmented([["", "기본"], ...levels.map((l) => [l.id, l.label])], c.effort || "",
+      levels.length ? h("div", { class: "effrow" }, segmented(levels.map((l) => [l.id, l.label]), c.effort || currentOf(c.agent).effort || "",
         (v) => { set({ effort: v }); draw(); })) : null,
+      levels.length && !c.effort ? h("div", { class: "pnote", text: currentOf(c.agent).effort
+        ? "지금은 모델 기본값을 씁니다 — 고르면 그 단계로 고정합니다" : "지금은 에이전트가 정합니다 — 고르면 그 단계로 고정합니다" }) : null,
       levels.length && c.effort ? h("div", { class: "pnote", text: (levels.find((l) => l.id === c.effort) || {}).desc || "" }) : null) });
     return pop;
   };
@@ -272,49 +291,79 @@ function shortcutBanner() {
     h("button", { class: "btn sm", onclick: () => add("start") }, "시작 메뉴만"),
     h("button", { class: "btn primary sm", onclick: () => add("start,desktop") }, "둘 다 만들기"));
 }
+// 첨부 — 파일(docx·pptx·xlsx·hwpx 는 글로 바꿔 함께 줌)이나 링크(공개 페이지는 글로 저장)
+function attachPop(anchor, d) {
+  const add = (items) => { d.attachments = [...new Set([...(d.attachments || []), ...items])]; closePop(); renderHome(); };
+  const link = h("input", { class: "pin", placeholder: "https://… 문서·페이지 주소 붙여넣고 Enter",
+    onkeydown: (e) => { if (e.key === "Enter" && /^https?:\/\//.test(e.target.value.trim())) add([e.target.value.trim()]); } });
+  popover(anchor, { width: 340, content: h("div", { class: "optpop" },
+    h("div", { class: "pt", text: "기획서·문서 첨부" }),
+    h("button", { class: "pi", onclick: async () => { const r = await call("pickFiles"); if (r.ok && r.data.length) add(r.data); } },
+      h("span", { class: "pl" }, h("b", { text: "파일 선택" })), h("span", { class: "pd", text: "md · txt · pdf · docx · pptx · xlsx · hwpx · 이미지 — 오피스·한글 문서는 글로 바꿔 함께 넘깁니다" })),
+    h("div", { class: "pt sub2", text: "링크" }),
+    h("div", { class: "pf", style: "border:none;margin:0;padding-top:0" }, link),
+    h("div", { class: "pnote", text: "공개 페이지는 내용을 저장해 넘기고, 로그인이 필요한 페이지(컨플루언스 등)는 링크만 넘깁니다 — 이때는 페이지를 내보내 파일로 첨부하면 확실합니다." })) });
+  setTimeout(() => link.focus(), 0);
+}
+const PLAN_EXAMPLES = [
+  "동네 카페 단골 적립 앱. 사장님은 태블릿으로 적립, 손님은 폰 번호로 확인.",
+  "사내 회의실 예약 웹. 겹치면 막고, 슬랙으로 알림.",
+  "쇼핑몰 관리자에서 상품 일괄 수정 화면. 엑셀 업로드·미리보기·되돌리기.",
+];
 function renderHome() {
   document.getElementById("app").classList.add("home");
   const m = $("#main"); m.replaceChildren();
   const d = S.draft, req = S.mode === "request";
-  const ta = h("textarea", { id: "homeText", placeholder: req ? "만들 기능을 적어 주세요 — 무엇을 받아 무엇을 돌려주는지, 예외는 어떻게 할지까지 적을수록 정확해집니다."
-      : "가져올 기능과 바꿀 점을 적어 주세요 — 예) 대화형 검색을 Rust/Axum 으로, 우리 OpenSearch 로", oninput: (e) => { d.request = e.target.value; } });
+  const PH = { request: "만들 기능을 적어 주세요 — 무엇을 받아 무엇을 돌려주는지, 예외는 어떻게 할지까지 적을수록 정확해집니다. 기획서를 첨부해도 됩니다.",
+    oss: "가져올 기능과 바꿀 점을 적어 주세요 — 예) 대화형 검색을 Rust/Axum 으로, 우리 OpenSearch 로",
+    plan: "만들고 싶은 것을 편하게 적어 주세요 — 누가 쓰는지, 왜 필요한지, 떠오르는 화면까지. 참고 문서·링크를 붙여도 됩니다.",
+    free: "에이전트에게 바로 시킬 일을 적어 주세요 — 우리 절차 없이 그대로 전달합니다." };
+  const ta = h("textarea", { id: "homeText", placeholder: PH[S.mode] || PH.request, oninput: (e) => { d.request = e.target.value; } });
   ta.value = d.request;
-  ta.addEventListener("input", () => { const b = document.querySelector(".homebox .send"); if (b && req) b.disabled = S.preparing || !d.request.trim(); });
+  ta.addEventListener("input", () => { const b = document.querySelector(".homebox .send"); if (b && req) b.disabled = S.preparing || (!d.request.trim() && !(d.attachments || []).length); });
   const folder = (key, label, hint) => h("span", { class: "field" + (d[key] ? "" : " unset"), title: d[key] || hint,
       onclick: async () => { const r = await call("pickFolder"); if (r.ok && r.data) { d[key] = r.data; renderHome(); } } },
     h("span", { class: "fold" }), label, h("b", { text: d[key] || hint }));
   d.policy = d.policy || { ...S.policy };
   const mode = (id, n, title, body, flow) => h("div", { class: "mode" + (S.mode === id ? " on" : ""), onclick: () => { S.mode = id; renderHome(); } },
     h("span", { class: "n", text: n }), h("b", { text: title }), h("span", { text: body }), h("span", { class: "flow", text: flow }));
-  const srcFields = req ? null : h("div", { class: "srcrow" },
+  const srcFields = S.mode !== "oss" ? null : h("div", { class: "srcrow" },
     h("label", { class: "sf" }, h("span", { text: "원본" }), h("input", { placeholder: "github.com/조직/저장소 또는 로컬 경로", value: d.source,
       oninput: (e) => { d.source = e.target.value; } })),
     h("label", { class: "sf" }, h("span", { text: "기능" }), h("input", { placeholder: "(선택) 비워 두면 기능 목록을 보여 주고 고르게 합니다", value: d.feature,
       oninput: (e) => { d.feature = e.target.value; } })));
   const brainBtn = pill("agent", "에이전트 · 모델 · 노력", brainLabel(d.agent, d.model, d.effort), (b) => brainPop(b, () => d,
     (patch) => { Object.assign(d, patch); const bb = document.querySelector(".toolbar .pill.brain .pv"); if (bb) bb.textContent = brainLabel(d.agent, d.model, d.effort); }, true), "brain");
+  const atts = (d.attachments || []).length ? h("div", { class: "atts" }, ...(d.attachments || []).map((f) => h("span", { class: "att", title: f },
+    ico(/^https?:/.test(f) ? "book" : "clip"), /^https?:/.test(f) ? f.replace(/^https?:\/\//, "").slice(0, 40) : f.split(/[\\/]/).pop(), h("button", { title: "빼기", onclick: () => { d.attachments = d.attachments.filter((x) => x !== f); renderHome(); } }, "×")))) : null;
   const fields = h("div", { class: "toolbar" },
     h("div", { class: "tl" },
-      folder("target_root", req ? "만들 곳" : "옮길 곳", "폴더 선택"),
+      h("button", { class: "iconbtn", title: "기획서·문서·링크 첨부", onclick: (e) => { e.stopPropagation(); attachPop(e.currentTarget, d); } }, ico("clip")),
+      folder("target_root", { request: "만들 곳", oss: "옮길 곳", plan: "저장할 곳", free: "작업 폴더" }[S.mode] || "폴더",
+        S.mode === "plan" ? "선택 안 하면 자동" : "폴더 선택"),
       req ? folder("context_dir", "참고", "저장소 선택") : null,
       pill("shield", "권한", modeLabel(d.policy), (b) => permMenu(b, d.policy, (p) => { d.policy = p; renderHome(); }, () => optionsPop(b, true))),
       h("button", { class: "iconbtn", title: "실행 옵션 (라운드·계획 승인·인증·세부 권한)", onclick: (e) => { e.stopPropagation(); optionsPop(e.currentTarget, false); } }, ico("sliders"))),
     h("div", { class: "tr" }, brainBtn,
-      h("button", { class: "send", disabled: S.preparing || !d.request.trim() && req, title: "시작 (Ctrl+Enter)", onclick: create },
+      h("button", { class: "send", disabled: S.preparing || !d.request.trim() && S.mode !== "oss" && !(d.attachments || []).length, title: "시작 (Ctrl+Enter)", onclick: create },
         S.preparing ? h("span", { class: "spin" }) : ico("up"))));
   const wrap = h("div", { class: "homewrap" }, h("div", { class: "homein" },
     shortcutBanner(),
     h("div", { class: "eyebrow", text: "NEW TASK" }),
     h("h1", { text: "새 작업" }),
-    h("div", { class: "modes" },
-      mode("request", "01", "요청사항으로 만들기", "만들 기능을 설명하면 요구사항과 합격 기준을 먼저 정해 승인받고, 그 기준대로 됐는지 검증합니다.",
-           "요구사항 → 합격 기준 → 계획 → 구현 → 검증 → 인수인계"),
-      mode("oss", "02", "오픈소스에서 가져오기", "원본 저장소의 기능을 분석해 내 프로젝트로 옮기고, 원본과 같은 동작인지 비교합니다.",
-           "분석 → 범위 → 원본 기록 → 계획 → 구현 → 비교")),
-    h("div", { class: "homebox" }, h("div", { class: "box" }, srcFields, ta, fields)),
-    h("div", { class: "homehint" }, h("span", { text: `${agentName(d.agent)} · ${modelLabel(d.agent, d.model)}${d.effort ? " · " + effortLabel(d.agent, d.model, d.effort) : ""} · 권한 ${modeLabel(d.policy)} · 최대 ${d.max_rounds}라운드` }),
+    h("div", { class: "modes four" },
+      mode("request", "01", "요청사항으로 만들기", "기준과 계획을 처음에 한 번 확인하면, 그 기준대로 될 때까지 만들고 검증합니다.",
+           "요구사항 → 합격 기준 → 계획 → 구현 → 검증"),
+      mode("oss", "02", "오픈소스에서 가져오기", "원본 저장소의 기능을 내 프로젝트로 옮기고, 원본과 같은 동작인지 비교합니다.",
+           "분석 → 범위 → 원본 기록 → 구현 → 비교"),
+      mode("plan", "03", "기획하기", "아이디어를 바로 만들 수 있는 기획서로 — 질문 몇 개로 빠르게. 다 되면 그대로 만들기로 넘깁니다.",
+           "질문 → 기획서 → 다듬기 → 만들기로"),
+      mode("free", "04", "자유 대화", "우리 절차 없이 Claude Code·Codex 를 그대로 — 폴더에서 대화하며 작업합니다.",
+           "메시지 → 작업 → 메시지 …")),
+    h("div", { class: "homebox" }, h("div", { class: "box" }, srcFields, ta, atts, fields)),
+    h("div", { class: "homehint" }, h("span", { text: `${agentName(d.agent)} · ${modelLabel(d.agent, d.model)}${d.effort ? " · " + effortLabel(d.agent, d.model, d.effort) : ""} · 권한 ${modeLabel(d.policy)} · ${+d.max_rounds ? `최대 ${d.max_rounds}회` : "끝날 때까지"} · ${(d.confirm_at || "start") === "start" ? "처음에 한 번 확인" : "마지막에 한 번 확인"}` }),
       h("span", { class: "k", text: "Ctrl Enter 시작" })),
-    req && !d.request ? h("div", { class: "examples" }, ...EXAMPLES.map((x) => h("div", { class: "ex", onclick: () => { d.request = x; renderHome(); } }, x))) : null,
+    (req || S.mode === "plan") && !d.request ? h("div", { class: "examples" }, ...(S.mode === "plan" ? PLAN_EXAMPLES : EXAMPLES).map((x) => h("div", { class: "ex", onclick: () => { d.request = x; renderHome(); } }, x))) : null,
     S.runs.length ? h("div", { class: "recent" }, h("h4", { text: "RECENT" }),
       h("div", { class: "rtable" }, ...S.runs.slice(0, 6).map((r) => h("div", { class: "rrow", onclick: () => openRun(r.id) },
         h("span", { class: "dot tone-" + r.tone }), h("span", { class: "t", text: r.name }), h("span", { class: "m", text: r.mode_text }),
@@ -325,7 +374,8 @@ function renderHome() {
 }
 // 실행 옵션 — 홈에서는 초안(S.draft)을, 실행 화면에서는 그 실행을 바꾼다
 function optionsPop(anchor, focusPerm, run) {
-  const d = run ? { max_rounds: run.max_rounds, plan_approval: run.plan_approval ?? S.detail.plan_approval, policy: { ...(run.policy || S.detail.policy) }, auth: run.auth } : S.draft;
+  const d = run ? { max_rounds: run.max_rounds, plan_approval: run.plan_approval ?? S.detail.plan_approval, confirm_at: run.confirm_at ?? S.detail.confirm_at,
+    policy: { ...(run.policy || S.detail.policy) }, auth: run.auth } : S.draft;
   const save = (patch) => {
     if (run) call("setRunOptions", run.id, JSON.stringify(patch)).then(async (r) => {
       if (!r.ok) return;
@@ -338,13 +388,21 @@ function optionsPop(anchor, focusPerm, run) {
   const agent = S.agents.find((a) => a.id === (run ? run.agent : d.agent));
   const pop = popover(anchor, { width: 380, content: h("div", { class: "optpop" },
     h("div", { class: "pt", text: "실행 옵션" }),
-    h("div", { class: "orow" }, h("div", {}, h("b", { text: "최대 라운드" }), h("span", { text: "에이전트를 몇 번까지 다시 부를지" })),
-      h("div", { class: "step" }, h("button", { onclick: (e) => { e.stopPropagation(); save({ max_rounds: Math.max(1, (+d.max_rounds || 8) - 1) }); } }, "−"),
-        h("span", { text: String(d.max_rounds) }), h("button", { onclick: (e) => { e.stopPropagation(); save({ max_rounds: Math.min(50, (+d.max_rounds || 8) + 1) }); } }, "+"))),
-    h("div", { class: "orow" }, h("div", {}, h("b", { text: "계획 승인" }), h("span", { text: "구현 전에 계획을 보고 승인" })),
-      toggle(d.plan_approval === true || d.plan_approval === "true", (v) => save({ plan_approval: v }))),
-    run ? null : h("div", { class: "orow" }, h("div", {}, h("b", { text: "인증" }), h("span", { text: "과금 방식만 다릅니다 — API 키는 환경 변수의 키로 종량 과금, 할 수 있는 일은 같음" })),
-      segmented([["subscription", "내 로그인"], ["api_key", "API 키"]], d.auth, (v) => save({ auth: v }))),
+    h("div", { class: "orow" }, h("div", {}, h("b", { text: "반복 횟수" }), h("span", { text: +d.max_rounds
+        ? "에이전트를 이 횟수까지 다시 부릅니다" : "완료 조건을 채울 때까지 반복 — 진전이 없으면 스스로 멈춥니다" })),
+      h("div", { style: "display:flex;gap:6px;align-items:center" },
+        toggle(+d.max_rounds > 0, (on) => save({ max_rounds: on ? 20 : 0 })),
+        +d.max_rounds > 0 ? h("div", { class: "step" }, h("button", { onclick: (e) => { e.stopPropagation(); save({ max_rounds: Math.max(1, +d.max_rounds - 5) }); } }, "−"),
+          h("span", { text: String(d.max_rounds) }), h("button", { onclick: (e) => { e.stopPropagation(); save({ max_rounds: Math.min(500, +d.max_rounds + 5) }); } }, "+")) : null)),
+    h("div", { class: "orow" }, h("div", {}, h("b", { text: "사람 확인" }), h("span", { text: (d.confirm_at || "start") === "start"
+        ? "처음에 기준과 계획을 한 번에 확인하면 끝날 때까지 맡깁니다" : "멈추지 않고 만들고 검증한 뒤, 마지막에 한 번 확인합니다" })),
+      segmented([["start", "처음에 한 번"], ["end", "마지막에 한 번"]], d.confirm_at || "start", (v) => save({ confirm_at: v }))),
+    (d.confirm_at || "start") === "start" ? h("div", { class: "orow" }, h("div", {}, h("b", { text: "계획도 함께 확인" }), h("span", { text: "기준과 함께 구현 계획도 처음에 확인" })),
+      toggle(d.plan_approval === true || d.plan_approval === "true", (v) => save({ plan_approval: v }))) : null,
+    run ? null : h("div", { class: "orow" }, h("div", {}, h("b", { text: "요금" }), h("span", { text: (d.auth || "subscription") === "subscription"
+        ? "구독 요금제(Claude Pro·Max, ChatGPT Plus·Pro)로 로그인한 그대로 — 요금제 한도 안에서 추가 비용 없음"
+        : "개발자 콘솔에서 발급한 API 키(환경 변수) — 쓴 만큼 따로 청구. 할 수 있는 일은 같습니다" })),
+      segmented([["subscription", "구독 로그인"], ["api_key", "API 키 (사용량 청구)"]], d.auth || "subscription", (v) => save({ auth: v }))),
     h("div", { class: "pt sub2", text: "권한 — 작업 종류별" }),
     agent && agent.note ? h("div", { class: "pnote", text: agent.note }) : null,
     policyRows(d.policy, (p) => save({ policy: p }))) });
@@ -353,7 +411,7 @@ function optionsPop(anchor, focusPerm, run) {
 async function create() {
   const d = S.draft;
   const payload = { mode: S.mode, request: d.request, target_root: d.target_root, context_dir: d.context_dir, source: d.source,
-    feature: d.feature, agent: d.agent, model: d.model, effort: d.effort, max_rounds: d.max_rounds, auth: d.auth,
+    feature: d.feature, agent: d.agent, model: d.model, effort: d.effort, confirm_at: d.confirm_at, attachments: d.attachments || [], max_rounds: d.max_rounds, auth: d.auth,
     plan_approval: d.plan_approval === true || d.plan_approval === "true", policy: d.policy || S.policy,
     name: (d.request || d.feature || "새 프로젝트").split(/[.\n]/)[0].slice(0, 28) };
   S.preparing = true; renderHome();
@@ -409,7 +467,7 @@ function renderRun() {
       h("div", { class: "tl" },
         pill("shield", "권한", modeLabel(D.policy), (b) => permMenu(b, D.policy, (p) => opt({ policy: p }), () => optionsPop(b, true, run))),
         h("button", { class: "iconbtn", title: "실행 옵션 (라운드·계획 승인·세부 권한)", onclick: (e) => { e.stopPropagation(); optionsPop(e.currentTarget, false, { ...run, policy: D.policy, plan_approval: D.plan_approval }); } }, ico("sliders")),
-        h("span", { class: "meta", text: `라운드 ${run.round || 0}/${run.max_rounds}` + (run.cost_usd ? ` · ${fmtMoney(run.cost_usd)}` : "") })),
+        h("span", { class: "meta", text: `${run.round || 0}회째${run.max_rounds ? ` / ${run.max_rounds}` : ""}` + (run.cost_usd ? ` · ${fmtMoney(run.cost_usd)}` : "") })),
       h("div", { class: "tr" },
         resumable && run.round ? h("button", { class: "btn quiet sm", title: "메시지 없이 이어서 진행", onclick: startRun }, ico("play"), "이어서") : null,
         pill("agent", "모델 · 노력 (다음 라운드부터)", brainLabel(run.agent, run.model, run.effort), (b) => brainPop(b, () => cur,
@@ -431,6 +489,13 @@ function updateSendMode() {
   b.replaceChildren(ico(running && !typed ? "stop" : "up"));
   const r = S.detail.run;
   b.disabled = !typed && !running && (r.status === "done" && r.accepted);
+}
+// 쓰던 에이전트가 연결돼 있지 않으면 연결된 것으로 (Claude 고정이 아니라)
+function pickReadyAgent() {
+  const d = S.draft, cur = S.agents.find((a) => a.id === d.agent);
+  if (S.agentPicked || (cur && cur.ready)) return;
+  const ready = S.agents.find((a) => a.ready);
+  if (ready && ready.id !== d.agent) { d.agent = ready.id; d.model = ""; d.effort = ""; }
 }
 function agentName(id) { const a = S.agents.find((x) => x.id === id); return a ? a.name.replace(" (실험적)", "") : (id || "Claude Code"); }
 async function startRun() {
@@ -508,7 +573,8 @@ function cards() {
   const D = S.detail, out = [];
   if (D.reviews && D.reviews.count) out.push(reviewCard(D.reviews));
   const plan = D.plan;
-  if (plan && plan.steps && plan.steps.length && !plan.approved && !(D.reviews && D.reviews.count)) out.push(planCard(plan));
+  // 기준과 계획은 함께 승인하므로 둘 다 보여 준다 — 보지 않은 계획(디자인 방향 포함)이 승인되지 않게
+  if (plan && plan.steps && plan.steps.length && !plan.approved) out.push(planCard(plan));
   for (const a of D.asks) out.push(a.kind === "permission" ? permCard(a) : askCard(a));
   if (D.handoff) out.push(handoffCard(D.handoff));
   for (const c of out) if (!c.classList.contains("done")) c.classList.add("decide");
@@ -517,6 +583,8 @@ function cards() {
 // 케이스가 무엇을 넣어 보는지 — 입력이 안 보이면 기대값만으로는 기준이 맞는지 판단할 수 없다
 function inputText(i) {
   if (!i || !Object.keys(i).length) return "(입력 없음)";
+  if (i.screen) { const sc = typeof i.screen === "object" ? i.screen : { path: i.screen };
+    return `화면 ${sc.file || sc.path || "/"}${sc.mobile ? " · 모바일" : ""}`; }
   if (i.argv) return i.argv.length ? i.argv.map((a) => (/\s/.test(a) || a === "" ? JSON.stringify(a) : a)).join(" ") : "(인자 없음)";
   if (i.path || i.method) return `${i.method || "GET"} ${i.path || "/"}` + (i.json !== undefined ? " " + JSON.stringify(i.json) : "");
   if (i.call) return `${Object.values(i.call)[0] || "호출"}(${(i.args || []).map((a) => JSON.stringify(a)).join(", ")})`;
@@ -534,8 +602,8 @@ const INPUT_KEYS = ["argv", "stdin", "method", "path", "json", "body", "headers"
 function caseToRow(c) {
   const input = {}; for (const k of INPUT_KEYS) if (k in c) input[k] = c[k];
   const cliOnly = Object.keys(input).every((k) => k === "argv");
-  const rest = {}; for (const [k, v] of Object.entries(c)) if (!INPUT_KEYS.includes(k) && !["name", "req", "expect"].includes(k)) rest[k] = v;
-  return { name: c.name || "", cli: cliOnly, input: cliOnly ? argvText(input.argv) : JSON.stringify(input),
+  const rest = {}; for (const [k, v] of Object.entries(c)) if (!INPUT_KEYS.includes(k) && !["name", "req", "expect", "description"].includes(k)) rest[k] = v;
+  return { name: c.name || "", desc: c.description || "", cli: cliOnly, input: cliOnly ? argvText(input.argv) : JSON.stringify(input),
     expect: JSON.stringify(c.expect || {}), req: [].concat(c.req || []).join(" "), rest };
 }
 function rowToCase(r, i) {
@@ -544,7 +612,7 @@ function rowToCase(r, i) {
   try { input = r.cli ? { argv: parseArgv(r.input) } : JSON.parse(r.input || "{}"); } catch { throw new Error(`${name}: 입력이 JSON 형식이 아닙니다`); }
   try { expect = JSON.parse(r.expect || "{}"); } catch { throw new Error(`${name}: 기대값이 JSON 형식이 아닙니다`); }
   const req = r.req.split(/[\s,]+/).filter(Boolean);
-  return { name, ...input, ...r.rest, req: req.length === 1 ? req[0] : req, expect };
+  return { name, ...(r.desc && r.desc.trim() ? { description: r.desc.trim() } : {}), ...input, ...r.rest, req: req.length === 1 ? req[0] : req, expect };
 }
 async function startEdit(kind) {
   closePop();
@@ -603,13 +671,13 @@ function specEditCard() {
       h("button", { class: "ebtn", title: "빼기", onclick: () => { E.reqs.splice(i, 1); redraw(); } }, "×"))),
       h("button", { class: "add", onclick: () => { E.reqs.push({ text: "" }); redraw(); } }, "+ 요구사항 추가")),
     h("div", { class: "sub", text: "합격 기준 — 입력은 CLI 인자(공백으로 구분) 또는 JSON, 기대값은 JSON (status · body · equals · match)" }),
-    h("div", { class: "elist" }, h("div", { class: "erow head" }, h("span", { text: "이름" }), h("span", { text: "입력" }), h("span", { text: "기대" }), h("span", { text: "요구사항" }), h("span")),
+    h("div", { class: "elist" }, h("div", { class: "erow head" }, h("span", { text: "설명" }), h("span", { text: "입력" }), h("span", { text: "기대" }), h("span", { text: "요구사항" }), h("span")),
       ...E.cases.map((c, i) => h("div", { class: "erow case" },
-        editField(c, "name", { ph: "이름" }), editField(c, "input", { mono: true, ph: c.cli ? "인자" : "{\"path\": \"/\"}" }),
+        editField(c, "desc", { ph: "설명 (예: 수량 10개 — 할인 시작)" }), editField(c, "input", { mono: true, ph: c.cli ? "인자" : "{\"path\": \"/\"}" }),
         editField(c, "expect", { mono: true, ph: '{"status": 0}' }), editField(c, "req", { ph: "R1 R2" }),
         h("button", { class: "ebtn", title: "빼기", onclick: () => { E.cases.splice(i, 1); redraw(); } }, "×"))),
       h("button", { class: "add", onclick: () => { const last = E.cases[E.cases.length - 1];
-        E.cases.push({ name: "", cli: last ? last.cli : true, input: "", expect: last ? last.expect : '{"status": 0}', req: "", rest: {} }); redraw(); } }, "+ 케이스 추가")),
+        E.cases.push({ name: "", desc: "", cli: last ? last.cli : true, input: "", expect: last ? last.expect : '{"status": 0}', req: "", rest: {} }); redraw(); } }, "+ 케이스 추가")),
     editFooter());
 }
 function planEditCard() {
@@ -634,7 +702,7 @@ function reviewCard(R) {
   if (R.requirements.length) rows.push(h("table", { class: "tbl" }, ...R.requirements.map((r) => h("tr", {}, h("td", { class: "k", text: r.id }), h("td", { text: r.text })))));
   if (R.expectations.length) rows.push(h("div", { class: "sub", text: "합격 기준" }),
     h("table", { class: "tbl" }, h("tr", { class: "th" }, h("td", { text: "케이스" }), h("td", { text: "입력" }), h("td", { text: "기대" }), h("td", { text: "" })),
-      ...R.expectations.map((e) => h("tr", {}, h("td", { text: e.case }), h("td", { class: "c in", text: inputText(e.input) }),
+      ...R.expectations.map((e) => h("tr", {}, h("td", {}, e.description || e.case, e.description ? h("span", { class: "cid", text: e.case }) : null), h("td", { class: "c in", text: inputText(e.input) }),
       h("td", { class: "c", text: expectText(e.expect) }), h("td", { class: "r", text: (e.reqs || []).join(" ") })))));
   if (R.divergences.length) rows.push(h("div", { class: "sub", text: "원본과 다르게 두는 점" }),
     h("table", { class: "tbl" }, ...R.divergences.map((x) => h("tr", {}, h("td", { text: x.summary })))));
@@ -652,12 +720,15 @@ function reviewCard(R) {
     ...rows,
     h("div", { class: "cf" }, h("span", { class: "hint", text: "직접 고치거나, 고칠 점을 입력창으로 보내세요" }),
       spec && S.detail.run.mode === "request" ? h("button", { class: "btn", onclick: () => startEdit("spec") }, "고치기") : null,
-      h("button", { class: "btn primary", onclick: () => approveShown("reviews") },
-        "승인", h("span", { class: "k", text: "Ctrl Enter" }))));
+      h("button", { class: "btn primary", onclick: () => approveShown(bothPending() ? "both" : "reviews") },
+        bothPending() ? "기준과 계획 승인" : "승인", h("span", { class: "k", text: "Ctrl Enter" }))));
 }
 function expectText(e) {
   if (!e) return "";
   const parts = [];
+  if (e.visible) parts.push("보여야 함: " + e.visible.join(", "));
+  if (e.selectors) parts.push("요소: " + e.selectors.join(", "));
+  if (e.no_errors) parts.push("스크립트 오류 없음");
   if (e.status != null) parts.push(String(e.status));
   for (const [k, v] of Object.entries(e.equals || {})) parts.push(`${k} ${JSON.stringify(v)}`);
   for (const [k, v] of Object.entries(e.match || {})) parts.push(`${k} ~ /${v}/`);
@@ -669,12 +740,13 @@ function planCard(plan) {
   return h("div", { class: "card" },
     h("div", { class: "ch" }, h("h3", { text: "구현 계획" }), h("span", { class: "tag", text: "확인 필요" })),
     plan.summary ? h("div", { class: "desc", text: plan.summary }) : null,
+    plan.design ? h("div", { class: "design" }, h("div", { class: "sub", text: "디자인 방향 — 이 방향으로 화면을 만듭니다" }), renderMd(plan.design)) : null,
     h("div", { class: "steps-list" }, ...plan.steps.map((s) => h("div", { class: "s" }, h("span", { text: s.title }),
       (s.files || []).length || (s.commands || []).length ? h("span", { class: "f", text: [...(s.files || []), ...(s.commands || []).map((c) => "$ " + c)].join("   ") }) : null))),
     h("div", { class: "cf" }, h("span", { class: "hint", text: "직접 고치거나, 바꿀 점을 입력창으로 보내세요" }),
       h("button", { class: "btn", onclick: () => startEdit("plan") }, "고치기"),
-      h("button", { class: "btn primary", onclick: () => approveShown("plan") },
-        "승인하고 구현 시작", h("span", { class: "k", text: "Ctrl Enter" }))));
+      h("button", { class: "btn primary", onclick: () => approveShown(bothPending() ? "both" : "plan") },
+        bothPending() ? "기준과 계획 승인" : "승인하고 구현 시작", h("span", { class: "k", text: "Ctrl Enter" }))));
 }
 function permCard(a) {
   const input = a.input || {};
@@ -712,23 +784,93 @@ function handoffCard(o) {
       o.risks ? h("h4", { text: "남은 위험·미검증" }) : null, o.risks ? h("p", { text: o.risks }) : null,
       o.follow_ups ? h("h4", { text: "이어서 할 일" }) : null, o.follow_ups ? h("p", { text: o.follow_ups }) : null),
     h("div", { class: "cf" }, h("span", { class: "hint", text: "고칠 점이 있으면 입력창으로 요청하세요" }),
-      h("button", { class: "btn", onclick: () => { S.tab = "changes"; S.sig.right = ""; renderRight(); } }, "변경 사항 보기"),
+      D.run.mode === "plan" ? h("button", { class: "btn", onclick: () => { S.tab = "brief"; S.sig.right = ""; renderRight(); } }, "기획서 보기")
+        : h("button", { class: "btn", onclick: () => { S.tab = "changes"; S.sig.right = ""; renderRight(); } }, "변경 사항 보기"),
+      D.run.mode === "plan" ? h("button", { class: "btn primary", onclick: () => call("readBrief", S.current).then((r) => r.ok && r.data.path && buildFromPlan(r.data.path)) }, "이 기획으로 만들기") : null,
       D.run.accepted ? null : h("button", { class: "btn primary", onclick: () => call("accept", S.current).then((r) => r.ok && (toast("수락했습니다"), refresh())) }, "수락")));
+}
+
+// ---------------------------------------------------------------- 기획서 보기 (마크다운을 안전하게 — HTML 은 글자로)
+function inlineMd(text) {
+  const out = []; const re = /(\*\*[^*]+\*\*|`[^`]+`)/g; let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(document.createTextNode(text.slice(last, m.index)));
+    out.push(m[0].startsWith("**") ? h("b", { text: m[0].slice(2, -2) }) : h("code", { text: m[0].slice(1, -1) }));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(document.createTextNode(text.slice(last)));
+  return out;
+}
+function renderMd(md) {
+  const root = h("div", { class: "md" }); const lines = md.replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) { const buf = []; i++; while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]); i++; root.append(h("pre", { text: buf.join("\n") })); continue; }
+    const hm = l.match(/^(#{1,6})\s+(.*)/);
+    if (hm) { root.append(h("h" + Math.min(4, hm[1].length), {}, ...inlineMd(hm[2]))); i++; continue; }
+    if (/^\s*\|/.test(l)) {
+      const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]);
+      const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const body = rows.filter((r) => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+      root.append(h("table", {}, ...body.map((r, k) => h("tr", {}, ...cells(r).map((c) => h(k === 0 ? "th" : "td", {}, ...inlineMd(c)))))));
+      continue;
+    }
+    if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
+      const ordered = /^\s*\d+\./.test(l); const list = h(ordered ? "ol" : "ul");
+      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) list.append(h("li", {}, ...inlineMd(lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, ""))));
+      root.append(list); continue;
+    }
+    if (!l.trim()) { i++; continue; }
+    const para = []; while (i < lines.length && lines[i].trim() && !/^(#|```|\s*\||\s*([-*]|\d+\.)\s)/.test(lines[i])) para.push(lines[i++]);
+    root.append(h("p", {}, ...inlineMd(para.join(" "))));
+  }
+  return root;
+}
+async function briefPane(p) {
+  const r = await call("readBrief", S.current);
+  if (!r.ok) return;
+  if (!r.data.text) { p.append(h("div", { class: "empty", text: "기획서를 쓰는 중입니다.\n질문이 오면 답해 주세요." })); return; }
+  p.append(h("div", { class: "briefbar" }, h("span", { class: "mono", text: r.data.path.split(/[\\/]/).slice(-3).join("/") }),
+    h("button", { class: "btn quiet sm", onclick: () => call("openFolder", r.data.path.replace(/[\\/][^\\/]+$/, "")) }, "폴더 열기"),
+    h("button", { class: "btn primary sm", onclick: () => buildFromPlan(r.data.path) }, "이 기획으로 만들기")), renderMd(r.data.text));
+}
+// 기획서를 첨부한 '요청사항으로 만들기'로 넘긴다 — 홈에서 폴더·에이전트를 고르고 시작
+function buildFromPlan(path) {
+  const d = S.draft;
+  S.mode = "request"; d.request = "첨부한 기획서대로 만든다. 기획서의 요구사항·합격 기준·디자인 방향을 그대로 따른다."; d.attachments = [path];
+  goHome(); toast("기획서를 첨부했습니다 — 만들 폴더를 고르고 시작하세요");
+}
+
+// 스크린샷 — 작게 보여 주고 누르면 크게
+function shotImg(path, title) {
+  const img = h("img", { class: "shot", alt: title, title: "크게 보기" });
+  call("screenshot", path).then((r) => { if (r.ok) img.src = r.data.url; });
+  img.addEventListener("click", () => {
+    const big = h("div", { class: "lightbox", onclick: () => big.remove() }, h("div", { class: "lbt", text: title }), h("img", { src: img.src }));
+    document.body.append(big);
+  });
+  return img;
 }
 
 // ---------------------------------------------------------------- 오른쪽 패널
 function renderRight() {
   const D = S.detail; if (!D) return;
-  const sig = JSON.stringify([S.tab, D.stage, D.gates, D.requirements, D.checks, D.plan, D.items, D.run.cost_usd, D.checkpoints, S.changes, S.file, D.spec]);
+  const sig = JSON.stringify([S.tab, D.stage, D.gates, D.requirements, D.checks, D.plan, D.items, D.run.cost_usd, D.checkpoints, S.changes, S.file, D.spec, D.handoff, D.run.round]);
   if (sig === S.sig.right) return; S.sig.right = sig;
   const right = $("#right");
   const nfiles = S.changes ? S.changes.files.length : null;
   const tab = (id, label, badge) => h("button", { class: S.tab === id ? "on" : "", onclick: () => { S.tab = id; S.sig.right = ""; if (id === "changes") loadChanges(); renderRight(); } },
     label, badge != null ? h("span", { class: "badge", text: badge }) : null);
   const pane = h("div", { class: "pane" });
-  right.replaceChildren(h("div", { class: "tabs" }, tab("progress", "현황"), D.spec ? tab("spec", "기준") : null, tab("checks", "검증",
-    D.checks && D.checks.cases ? `${D.checks.passed}/${D.checks.cases}` : null), tab("changes", "변경", nfiles)), pane);
-  if (S.tab === "progress") progressPane(pane);
+  const m = D.run.mode;
+  if (m === "plan" && !["brief", "changes"].includes(S.tab)) S.tab = "brief";
+  if (m === "free" && S.tab !== "changes") S.tab = "changes";
+  const tabs = m === "plan" ? [tab("brief", "기획서"), tab("changes", "변경", nfiles)] : m === "free" ? [tab("changes", "변경", nfiles)]
+    : [tab("progress", "현황"), D.spec ? tab("spec", "기준") : null, tab("checks", "검증", D.checks && D.checks.cases ? `${D.checks.passed}/${D.checks.cases}` : null), tab("changes", "변경", nfiles)];
+  right.replaceChildren(h("div", { class: "tabs" }, ...tabs.filter(Boolean)), pane);
+  if (S.tab === "brief") briefPane(pane);
+  else if (S.tab === "progress") progressPane(pane);
   else if (S.tab === "changes") changesPane(pane);
   else if (S.tab === "spec" && D.spec) specPane(pane);
   else checksPane(pane);
@@ -807,7 +949,7 @@ function specPane(p) {
     ...reqs.map((r) => h("div", { class: "li" }, h("span", { class: "k", text: r.id }), h("span", { class: "x", text: r.text }), h("span")))));
   p.append(h("div", { class: "sec" }, h("h4", {}, "합격 기준", h("span", { text: `${sp.cases.length}개` })),
     h("div", { class: "hint2", text: "이 입력을 넣으면 이 결과가 나와야 완료로 봅니다" }),
-    ...sp.cases.map((c) => h("div", { class: "case" }, h("div", { class: "ct" }, h("b", { text: c.name }), h("span", { class: "rq", text: c.reqs.join(" ") })),
+    ...sp.cases.map((c) => h("div", { class: "case" }, h("div", { class: "ct" }, h("b", { text: c.description || c.name }), h("span", { class: "rq", text: c.reqs.join(" ") })),
       h("div", { class: "io" }, h("span", { class: "in", text: inputText(c.input) }), h("i", { text: "→" }), h("span", { text: expectText(c.expect) }))))));
   if (D.plan && D.plan.steps && D.plan.steps.length) {
     p.append(h("div", { class: "sec" }, h("h4", {}, "계획", h("span", { text: D.plan.approved ? `${D.plan.approved_by || "사용자"} 승인${D.plan.approved_at ? " · " + stamp(D.plan.approved_at) : ""}` : "승인 전" })),
@@ -832,10 +974,11 @@ function checksPane(p) {
     const ok = g.cases.length && g.cases.every((c) => c.ok);
     p.append(h("div", { class: "rgroup" }, h("div", { class: "rh" }, ok ? ico("check", "gi") : h("span", { class: "ci fail", text: g.cases.length ? "!" : "?" }),
       h("span", { class: "k", text: g.r.id }), h("span", { text: g.r.text })),
-      ...g.cases.map((c) => h("div", { class: "case" + (c.ok === false ? " bad" : "") }, h("div", { class: "ct" }, h("b", { text: c.name }),
+      ...g.cases.map((c) => h("div", { class: "case" + (c.ok === false ? " bad" : "") }, h("div", { class: "ct" }, h("b", { text: c.description || c.name }),
           h("span", { class: "res " + (c.ok ? "ok" : c.ok === false ? "fail" : ""), text: c.ok ? "통과" : c.ok === false ? "다름" : "미실행" })),
         h("div", { class: "io" }, h("span", { class: "in", text: inputText(c.input) }), h("i", { text: "→" }), h("span", { text: "기대 " + expectText(c.expect) })),
-        c.actual ? h("div", { class: "io act" }, h("span", { text: "실제 " + [c.actual.status, c.actual.body, c.actual.error].filter((x) => x != null).join(" · ") })) : null,
+        c.screenshot ? shotImg(c.screenshot, c.description || c.name)
+          : c.actual ? h("div", { class: "io act" }, h("span", { text: "실제 " + [c.actual.status, c.actual.body, c.actual.error].filter((x) => x != null).join(" · ") })) : null,
         c.diffs.length ? h("div", { class: "io bad", text: c.diffs.join("  ") }) : null))));
   }
   const help = sp.gates_help || {};
@@ -847,11 +990,16 @@ function checksPane(p) {
 // ---------------------------------------------------------------- 갱신·단축키
 // 화면에 보이는 내용의 지문을 함께 보낸다 — 그 사이 에이전트가 바꿨으면 승인되지 않고 새 내용을 다시 보여 준다
 async function approveShown(what) {
+  // 처음에 한 번 확인: 기준과 계획이 함께 떠 있으면 한 번에 승인한다 (각각 보인 내용 그대로)
   const D = S.detail;
-  const r = what === "plan" ? await call("approvePlan", S.current, D.plan_sig || "") : await call("approveReviews", S.current, D.review_sig || "");
-  if (r.ok) toast(what === "plan" ? "계획을 승인했습니다" : "승인했습니다");
+  const reviews = D.reviews && D.reviews.count, plan = D.plan && D.plan.steps && D.plan.steps.length && !D.plan.approved;
+  let ok = true;
+  if (reviews && (what === "reviews" || what === "both")) ok = (await call("approveReviews", S.current, D.review_sig || "")).ok && ok;
+  if (plan && ok && (what === "plan" || what === "both")) ok = (await call("approvePlan", S.current, D.plan_sig || "")).ok && ok;
+  if (ok) toast(reviews && plan && what === "both" ? "기준과 계획을 승인했습니다 — 끝날 때까지 진행합니다" : "승인했습니다");
   refresh();
 }
+function bothPending() { const D = S.detail; return !!(D && D.reviews && D.reviews.count && D.plan && D.plan.steps && D.plan.steps.length && !D.plan.approved); }
 async function refresh() {
   const lr = await call("listRuns"); if (lr.ok) S.runs = lr.data;
   renderSide();
@@ -870,7 +1018,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && S.detail.running) { call("stop", S.current).then(refresh); return; }
   if (e.ctrlKey && e.key === "Enter") {
     if (S.edit) return;
-    if (S.detail.reviews && S.detail.reviews.count) approveShown("reviews");
+    if (bothPending()) approveShown("both");
+    else if (S.detail.reviews && S.detail.reviews.count) approveShown("reviews");
     else if (S.detail.plan && S.detail.plan.steps && !S.detail.plan.approved) approveShown("plan");
     return;
   }
@@ -892,12 +1041,16 @@ new QWebChannel(qt.webChannelTransport, async (ch) => {
     S.draft.request = ""; openRun(r.run_id).then(() => r.start && startRun());
   });
   const b = await call("bootstrap");
-  if (b.ok) { S.agents = b.data.agents; S.runs = b.data.runs; S.kinds = b.data.kinds; S.policy = b.data.default_policy; S.permModes = b.data.permission_modes || []; $("#ver").textContent = "v" + b.data.version; }
+  if (b.ok) { S.agents = b.data.agents; S.runs = b.data.runs; S.kinds = b.data.kinds; S.policy = b.data.default_policy; S.permModes = b.data.permission_modes || []; $("#ver").textContent = "v" + b.data.version;
+    const def = b.data.defaults || {};  // 지난번 새 작업의 선택
+    for (const k of ["agent", "model", "effort", "max_rounds", "plan_approval", "confirm_at", "auth"]) if (def[k] != null && def[k] !== "") S.draft[k] = def[k];
+    if (def.policy) S.draft.policy = { ...def.policy };
+    pickReadyAgent(); }
   const sc = await call("shortcutStatus"); if (sc.ok) S.shortcut = sc.data;
   renderSide(); renderHome();
   api.dataReady.connect((raw) => { const r = JSON.parse(raw); if (r.ok && openPop && openPop.querySelector(".datapop")) { S.data = r.data; drawData($("#databtn")); } });
   $("#databtn").addEventListener("click", (e) => { e.stopPropagation(); if (openPop && openPop.querySelector(".datapop")) { closePop(); return; } dataPop(e.currentTarget); });
-  api.agentsChanged.connect((raw) => { S.agents = JSON.parse(raw); renderSide(); if (!S.current) renderHome(); });
+  api.agentsChanged.connect((raw) => { S.agents = JSON.parse(raw); pickReadyAgent(); renderSide(); if (!S.current) renderHome(); });
   // 진행 중일 때만 자주(1.5초), 한가하면 5초, 창이 가려져 있으면 쉰다 — 앱이 쓸데없이 일하지 않게
   const tick = async () => {
     if (!document.hidden) { try { await refresh(); } catch (e) { /* 다음 번에 다시 */ } }

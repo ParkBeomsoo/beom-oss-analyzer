@@ -62,7 +62,7 @@ def test_bridge_decisions_are_recorded_in_process(tmp_path, settings):
 
     assert json.loads(api.accept(run["id"]))["ok"] and inbox.load_run(settings, run["id"])["accepted"]
     bad = json.loads(api.createRun(json.dumps({"mode": "request", "target_root": ""})))
-    assert not bad["ok"] and "만들 곳" in bad["error"]
+    assert not bad["ok"] and "폴더" in bad["error"]
 
 
 def test_permission_answer_through_bridge(tmp_path, settings):
@@ -172,3 +172,25 @@ def test_view_cache_refreshes_when_run_changes(tmp_path, settings):
     inbox.update_run(settings, run["id"], lambda r: r.update(name="새 이름"))
     b = view.summary(settings, inbox.load_run(settings, run["id"]))
     assert a["name"] != b["name"] == "새 이름"  # 캐시가 바뀐 내용을 놓치지 않는다
+
+
+def test_attachments_are_copied_into_the_target_and_named_in_the_request(tmp_path, settings):
+    doc = tmp_path / "기획서.md"
+    doc.write_text("# 주문 총액\n- 10개 이상 10% 할인", encoding="utf-8")
+    api = Api(settings)
+    req = api._attach({"target_root": str(tmp_path / "mine"), "request": "", "attachments": [str(doc)]})
+    assert (tmp_path / "mine" / ".oss" / "brief" / "기획서.md").is_file()
+    assert ".oss/brief/기획서.md" in req and "먼저 모두 읽고" in req
+
+
+def test_case_description_shows_in_review(tmp_path, settings):
+    run = runner.create(settings, mode="request", target_root=str(tmp_path / "mine"), request="수량으로 총액", name="총액")
+    conn, proj = project.load(settings, run["project_id"])
+    make.set_requirements(conn, run["port_id"], [{"text": "총액 = 수량 x 2000"}])
+    cases = tmp_path / "c.json"
+    cases.write_text(json.dumps({"cases": [{"name": "one", "description": "수량 1개 — 2000원", "argv": ["1"], "req": "R1",
+                                            "expect": {"equals": {"total": 2000}}}]}, ensure_ascii=False), encoding="utf-8")
+    port.capture(conn, proj, settings, run["port_id"], str(cases))
+    d = view.detail(settings, run["id"])
+    assert d["reviews"]["expectations"][0]["description"] == "수량 1개 — 2000원"
+    assert d["spec"]["cases"][0]["description"] == "수량 1개 — 2000원"

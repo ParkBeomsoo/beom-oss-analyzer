@@ -207,13 +207,15 @@ def _parser() -> argparse.ArgumentParser:
                    help="앱을 열지 않고 바로가기만 만든다 — 시작 메뉴(검색에 나옴)·바탕화면")
     p.add_argument("--remove-shortcut", action="store_true", help="만든 바로가기를 지운다")
     p = sub.add_parser("run", help="자동 실행 — Claude Code 로 단계를 끝까지 진행 (승인·질문은 앱에서)")
-    p.add_argument("--mode", choices=["request", "oss"], help="새 실행일 때 필수")
+    p.add_argument("--mode", choices=["request", "oss", "plan", "free"], help="새 실행일 때 필수 — plan: 기획서만, free: 절차 없이 에이전트 그대로")
     p.add_argument("--target-root", help="새 실행일 때 필수")
     p.add_argument("--name")
     p.add_argument("--request", default="", help="요청사항 (request 모드) 또는 추가 요청 (oss 모드)")
     p.add_argument("--source", help="원본 저장소 (oss 모드)")
     p.add_argument("--feature", help="옮길 기능 (oss 모드)")
-    p.add_argument("--max-rounds", type=int, default=8)
+    p.add_argument("--max-rounds", type=int, default=0, help="0 = 제한 없음 (완료 조건을 채울 때까지, 헛돌면 멈춤)")
+    p.add_argument("--confirm-at", choices=["start", "end"], default="start",
+                   help="start: 처음에 기준·계획을 한 번에 확인하고 끝까지 / end: 멈추지 않고 만든 뒤 마지막에 한 번 확인")
     p.add_argument("--model")
     p.add_argument("--auth", choices=["subscription", "api_key"], default="subscription")
     p.add_argument("--agent", choices=["claude", "codex", "gemini"], default="claude")
@@ -342,7 +344,7 @@ def _run(args: argparse.Namespace) -> Any:
         else:
             run_id = runner.create(settings, mode=args.mode, target_root=args.target_root, request=args.request,
                                    name=args.name, source=args.source, feature=args.feature, max_rounds=args.max_rounds,
-                                   model=args.model, auth=args.auth, agent=args.agent)["id"]
+                                   model=args.model, auth=args.auth, agent=args.agent, confirm_at=args.confirm_at)["id"]
             if args.create_only:
                 return {"run_id": run_id}
         sys.stderr.write(f"실행 {run_id} — 승인·질문은 데스크톱 앱(beom-oss-analyzer)에서 답한다\n")

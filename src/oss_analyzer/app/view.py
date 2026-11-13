@@ -14,8 +14,10 @@ from oss_analyzer.core.checkpoints import Checkpoints
 STAGES = {
     "request": ["요구사항", "합격 기준", "계획", "구현", "검증", "인수인계"],
     "oss": ["분석", "범위", "원본 기록", "계획", "구현", "검증", "인수인계"],
+    "plan": ["질문", "기획서", "다듬기"],
+    "free": ["대화"],
 }
-MODE_TEXT = {"request": "요청사항", "oss": "오픈소스"}
+MODE_TEXT = {"request": "요청사항", "oss": "오픈소스", "plan": "기획", "free": "자유 대화"}
 TOOL_TEXT = {
     "oss_make_requirements": "요구사항 정리", "oss_port_capture": "합격 기준 저장", "oss_port_verify": "검증 실행",
     "oss_port_map": "구현 위치 기록", "oss_port_status": "진행 상태 확인", "oss_plan_set": "계획 작성",
@@ -44,7 +46,7 @@ def sig(value) -> str:
 
 def plan_core(plan: dict) -> dict:
     return {"steps": [{k: s.get(k) for k in ("title", "files", "commands", "requirements")} for s in plan.get("steps") or []],
-            "summary": plan.get("summary"), "at": plan.get("at")}
+            "summary": plan.get("summary"), "design": plan.get("design"), "at": plan.get("at")}
 
 
 def _status(run: dict, asks: int, reviews: int, alive: bool = True) -> tuple[str, str]:
@@ -61,6 +63,8 @@ def _status(run: dict, asks: int, reviews: int, alive: bool = True) -> tuple[str
         return "확인 필요", "check"
     if s == "error":
         return "실패", "fail"
+    if s == "waiting_input":
+        return ("내 차례", "turn") if alive else ("중단됨", "idle")
     if s == "created":
         return "준비됨", "idle"
     if s == "preparing":
@@ -71,6 +75,10 @@ def _status(run: dict, asks: int, reviews: int, alive: bool = True) -> tuple[str
 def _stage(run: dict, st: dict | None) -> int:
     mode = run["mode"]
     last = len(STAGES[mode]) - 1
+    if mode == "free":
+        return 0
+    if mode == "plan":
+        return 2 if run.get("handoff") and run.get("round", 0) > 1 else 1 if run.get("round") else 0
     if run.get("status") == "done" or run.get("handoff"):
         return last
     if st is None:
@@ -181,7 +189,9 @@ def feed(settings, run: dict) -> list[dict]:
         elif k == "finished":
             out.append({"type": "note", "tone": "ok", "text": "완료 조건을 모두 채웠습니다 — 완료 판정 기록"})
         elif k == "max_rounds":
-            out.append({"type": "note", "tone": "warn", "text": "정한 라운드를 모두 썼습니다"})
+            out.append({"type": "note", "tone": "warn", "text": "정한 반복 횟수를 모두 썼습니다 — 메시지를 보내면 이어서 진행합니다"})
+        elif k == "note" and e.get("text"):
+            out.append({"type": "note", "tone": e.get("tone") or "", "text": str(e["text"])[:1000], "at": e.get("at")})
         elif k == "stalled":
             out.append({"type": "note", "tone": "warn", "text": "두 라운드 연속 진행이 없어 멈췄습니다 — 에이전트 응답을 확인하고 지시를 보내 주세요"})
         for item in out[before:]:
@@ -203,7 +213,8 @@ def _reviews(reviews: list[dict], conn, port_id: str) -> dict:
         elif h["kind"] == "expectation":
             name = h["item_id"].split(":", 1)[1]
             ex = exps.get(name) or {}
-            out["expectations"].append({"case": name, "expect": ex.get("expect"), "new": ex.get("new"), "input": ex.get("input"),
+            out["expectations"].append({"case": name, "description": ex.get("description"), "expect": ex.get("expect"),
+                                        "new": ex.get("new"), "input": ex.get("input"),
                                         "order": ex.get("order", 0), "source": ex.get("source"), "reqs": req_of.get(name, [])})
         elif h["kind"] == "divergence":
             out["divergences"].append({"summary": h["summary"], "detail": h.get("detail")})
@@ -238,9 +249,10 @@ def _spec_view(conn, port_id: str, rows: list[dict], last: dict | None) -> dict:
     cases = []
     for name, e in sorted(exps.items(), key=lambda kv: kv[1].get("order", 0)):
         r = result.get(name)
-        cases.append({"name": name, "input": e.get("input"), "expect": e.get("expect"),
+        cases.append({"name": name, "description": e.get("description"), "input": e.get("input"), "expect": e.get("expect"),
                       "reqs": [k for k, v in cover.items() if name in v],
-                      "ok": r["ok"] if r else None, "actual": (r or {}).get("actual"), "diffs": (r or {}).get("diffs") or []})
+                      "ok": r["ok"] if r else None, "actual": (r or {}).get("actual"), "diffs": (r or {}).get("diffs") or [],
+                      "screenshot": (r or {}).get("screenshot")})
     appr = conn.execute("SELECT at, payload FROM port_log WHERE port_id = ? AND action = 'approve' ORDER BY rowid DESC LIMIT 1",
                         (port_id,)).fetchone()
     who = None
@@ -330,7 +342,7 @@ def _detail(settings, run_id: str) -> dict:
            "feed": feed(settings, run), "messages": run.get("messages") or [],
            "plan_sig": sig(plan_core(run["plan"])) if (run.get("plan") or {}).get("steps") else None,
            "policy": run.get("policy") or {}, "perm_mode": inbox.mode_of(run.get("policy") or {}),
-           "plan_approval": run.get("plan_approval", True)}
+           "plan_approval": run.get("plan_approval", True), "confirm_at": run.get("confirm_at", "start")}
     if st:
         last = st.get("last_check")
         rows = (port._last_check(conn, run["port_id"], "differential:%") or {}).get("detail", {}).get("rows", []) if last else []

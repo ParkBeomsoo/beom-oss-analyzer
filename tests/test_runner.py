@@ -1,5 +1,7 @@
 """자동 실행기 — 가짜 claude 로 라운드 진행·승인 대기·완료 판정·환경 처리·권한 규칙을 확인 (실제 Claude Code 없이)."""
 import json
+
+import pytest
 import os
 import sys
 import threading
@@ -57,7 +59,7 @@ def test_runner_rounds_wait_for_approval_and_finish(tmp_path, settings, monkeypa
     monkeypatch.setenv("FAKE_LOG", str(tmp_path / "calls.jsonl"))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy-not-a-real-key")
     run = runner.create(settings, mode="request", target_root=str(tmp_path / "mine"), request="수량을 받아 총액을 낸다",
-                        name="총액", max_rounds=4)
+                        name="총액", max_rounds=4, confirm_at="start")
     monkeypatch.setenv("FAKE_RUN", run["id"])
     r = runner.Runner(settings, run["id"], exe=[sys.executable, str(fake)])
     out = {}
@@ -67,14 +69,12 @@ def test_runner_rounds_wait_for_approval_and_finish(tmp_path, settings, monkeypa
         if inbox.load_run(settings, run["id"])["status"] == "waiting_approval":
             break
         time.sleep(0.2)
-    assert inbox.load_run(settings, run["id"])["status"] == "waiting_approval"
+    got = inbox.load_run(settings, run["id"])
+    assert got["status"] == "waiting_approval" and (got.get("plan") or {}).get("steps")  # 처음에 한 번: 기준과 계획이 함께
     conn, _ = project.load(settings, run["project_id"])
     guard.approve(conn, run["port_id"], port.pending_reviews(conn, run["port_id"]), channel="desktop-app", approved_by="tester")
-    for _ in range(900):  # 가짜 에이전트도 매 라운드 패키지를 새로 import — 첫 실행은 느리다
-        if inbox.load_run(settings, run["id"])["status"] == "waiting_plan":
-            break
-        time.sleep(0.2)
-    assert inbox.load_run(settings, run["id"])["status"] == "waiting_plan"
+    time.sleep(2)
+    assert inbox.load_run(settings, run["id"])["status"] == "waiting_approval"  # 계획까지 승인해야 진행
     rr = inbox.load_run(settings, run["id"]); rr["plan"]["approved"] = True; inbox.save_run(settings, rr)
     t.join(timeout=300)
     assert out.get("status") == "done", out
@@ -87,7 +87,8 @@ def test_runner_rounds_wait_for_approval_and_finish(tmp_path, settings, monkeypa
     assert "mcp__oss-analyzer__oss_port_approve" in a[a.index("--disallowedTools") + 1]
     evs, _ = inbox.events(settings, run["id"])
     kinds = [e["kind"] for e in evs]
-    assert {"round_start", "agent_init", "agent", "agent_result", "waiting_approval", "waiting_plan", "finished", "checkpoint"} <= set(kinds)
+    assert {"round_start", "agent_init", "agent", "agent_result", "waiting_approval", "finished", "checkpoint"} <= set(kinds)
+    assert kinds.count("waiting_approval") == 1 and "waiting_plan" not in kinds  # 멈춘 건 처음 한 번뿐
     assert inbox.load_run(settings, run["id"]).get("handoff")
     assert port.status_(conn, run["port_id"])["finished"]["valid"]
 
@@ -335,3 +336,75 @@ def test_effort_reaches_agent_command(tmp_path, settings):
     argv2, _ = agents.ClaudeCode(exe="claude").command(settings, run2, "작업", "규칙")
     assert argv2[argv2.index("--effort") + 1] == "high" and argv2[argv2.index("--model") + 1] == "opus"
     assert [l["id"] for l in agents.ClaudeCode(exe="claude").efforts()[""]] == ["low", "medium", "high", "xhigh", "max"]
+
+
+
+def test_confirm_at_end_runs_through_and_asks_once(tmp_path, settings, monkeypatch):
+    """'마지막에 한 번 확인': 기준을 만든 뒤 멈추지 않고 구현·검증까지 하고, 승인만 남았을 때 한 번 멈춘다."""
+    fake = tmp_path / "fake_claude.py"
+    fake.write_text(FAKE, encoding="utf-8")
+    monkeypatch.setenv("OSS_ANALYZER_HOME", str(settings.home))
+    monkeypatch.setenv("FAKE_LOG", str(tmp_path / "calls.jsonl"))
+    run = runner.create(settings, mode="request", target_root=str(tmp_path / "mine"), request="수량을 받아 총액을 낸다",
+                        name="총액", max_rounds=6, confirm_at="end")
+    assert run["confirm_at"] == "end"
+    monkeypatch.setenv("FAKE_RUN", run["id"])
+    r = runner.Runner(settings, run["id"], exe=[sys.executable, str(fake)])
+    out = {}
+    t = threading.Thread(target=lambda: out.update(r.run()))
+    t.start()
+    for _ in range(900):
+        if inbox.load_run(settings, run["id"])["status"] == "waiting_approval":
+            break
+        time.sleep(0.2)
+    got = inbox.load_run(settings, run["id"])
+    assert got["status"] == "waiting_approval" and (tmp_path / "mine" / "app.py").is_file()  # 이미 구현까지 했다
+    conn, _ = project.load(settings, run["project_id"])
+    st = port.status_(conn, run["port_id"])
+    assert [k for k, v in st["gates"].items() if not v] == [port.GATE_HUMAN]  # 남은 건 사람 승인뿐
+    evs, _ = inbox.events(settings, run["id"])
+    assert sum(1 for e in evs if e["kind"] in ("waiting_approval", "waiting_plan")) == 1  # 한 번만 멈춤
+    guard.approve(conn, run["port_id"], port.pending_reviews(conn, run["port_id"]), channel="desktop-app", approved_by="tester")
+    t.join(timeout=300)
+    assert out.get("status") == "done", out
+    assert port.status_(conn, run["port_id"])["finished"]["valid"] and inbox.load_run(settings, run["id"]).get("handoff")
+
+
+def test_build_commands_are_exact_lines_only(tmp_path):
+    """덧붙인 인자가 실행기를 바꿀 수 있으니 정확히 그 줄만 '빌드'로 바로 허용한다."""
+    c = lambda cmd: inbox.classify("Bash", {"command": cmd}, tmp_path, [])  # noqa: E731
+    assert {c("yarn build"), c("go test ./..."), c("cargo test"), c("pytest"), c("npm test")} == {"build"}
+    assert {c("yarn dlx evil"), c("go test -exec x"), c("pytest -p evil"), c("npm test -- --x"), c("yarn")} == {"commands"}
+
+
+def test_current_model_comes_from_each_cli(tmp_path, monkeypatch):
+    """'기본' 대신 실제로 쓰일 값 — 설정 파일, 없으면 최근에 실제로 쓴 모델."""
+    from oss_analyzer.core import agents
+    codex = tmp_path / "codex"
+    day = codex / "sessions" / "2026" / "11" / "13"
+    day.mkdir(parents=True)
+    (day / "rollout-a.jsonl").write_text(json.dumps({"type": "turn_context", "payload": {"model": "gpt-x"}}) + "\n", encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(codex))
+    assert agents.Codex(exe="codex").current() == {"model": "gpt-x", "effort": None, "source": "최근 사용"}
+    (codex / "config.toml").write_text('model = "gpt-y"\nmodel_reasoning_effort = "high"\n', encoding="utf-8")
+    assert agents.Codex(exe="codex").current() == {"model": "gpt-y", "effort": "high", "source": "Codex 설정"}
+    claude = tmp_path / "claude"
+    proj = claude / "projects" / "D--x"
+    proj.mkdir(parents=True)
+    (proj / "s.jsonl").write_text(json.dumps({"message": {"model": "claude-sonnet-9-1"}}) + "\n", encoding="utf-8")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
+    cur = agents.ClaudeCode(exe="claude").current()
+    assert cur["model"] == "sonnet" and cur["full"] == "claude-sonnet-9-1" and cur["source"] == "최근 사용"
+
+
+def test_call_given_as_plain_string(tmp_path):
+    """실제 Codex 실행에서 나온 형식 — "call": "파일:함수" 는 대상 함수로, 함수 이름만이면 알아듣게 거절 (예전엔 내부 오류)."""
+    from oss_analyzer.common.response import ToolError
+    f = tmp_path / "c.json"
+    f.write_text(json.dumps({"cases": [{"name": "one", "call": "app.js:calculateOrder", "args": ["1"], "expect": {"body": 2000}}]}), encoding="utf-8")
+    assert port._load_cases(f)[1][0]["call"] == {"target": "app.js:calculateOrder"}
+    f.write_text(json.dumps({"cases": [{"name": "one", "call": "calculateOrder", "args": ["1"], "expect": {"body": 2000}}]}), encoding="utf-8")
+    with pytest.raises(ToolError) as e:
+        port._load_cases(f)
+    assert "파일:함수" in e.value.message
+    assert port.case_commands([{"name": "x", "call": "calculateOrder", "runtime": "node"}]) == {}

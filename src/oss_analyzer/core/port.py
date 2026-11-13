@@ -968,12 +968,12 @@ def _get_any(body, path: str):
     return cur
 
 
-EXPECT_KEYS = {"status", "body", "equals", "match"}
+EXPECT_KEYS = {"status", "body", "equals", "match", "visible", "selectors", "no_errors"}
 # 케이스 파일에서 읽는 키 — 모르는 키는 거절한다 (오타·다른 형식의 키가 조용히 무시되면 엉뚱한 입력으로 검증된다)
-CASE_KEYS = {"name", "argv", "stdin", "method", "path", "json", "body", "headers", "call", "args", "kwargs", "runtime",
+CASE_KEYS = {"name", "argv", "stdin", "method", "path", "json", "body", "headers", "call", "args", "kwargs", "runtime", "screen",
              "expect", "invariant", "req", "new", "compare", "ignore", "match", "explore", "concurrent", "generated",
              "from", "note", "description"}
-CASE_INPUT_KEYS = ("argv", "stdin", "method", "path", "json", "body", "headers", "call", "args", "kwargs")
+CASE_INPUT_KEYS = ("argv", "stdin", "method", "path", "json", "body", "headers", "call", "args", "kwargs", "screen")
 CASE_KEY_HINTS = {"id": "케이스 이름은 name", "kind": "종류는 키로 정해짐 (argv/stdin=CLI, path/method=HTTP, call=함수)",
                   "cmd": "실행 명령은 케이스가 아니라 source_cli/target_cli 로", "input": "CLI 표준 입력은 stdin",
                   "expected": "기대값은 expect", "requirement": "요구사항 연결은 req", "reqs": "요구사항 연결은 req"}
@@ -1004,6 +1004,15 @@ def check_expect(dst: dict, case: dict) -> list[str]:
         got = _get_any(body, p)
         if got is _MISSING or not re.fullmatch(rx, str(got)):
             diffs.append(f"{p}: {None if got is _MISSING else got!r} 가 기대 /{rx}/ 와 맞지 않음")
+    if "visible" in e or "selectors" in e or e.get("no_errors"):  # 화면 케이스
+        shown = body if isinstance(body, dict) else {}
+        missing = [t for t in e.get("visible") or [] if t not in (shown.get("visible") or [])]
+        if missing:
+            diffs.append(f"화면에 없음: {', '.join(missing)[:300]}")
+        if e.get("selectors") and shown.get("selectors_missing"):
+            diffs.append(f"요소 없음: {', '.join(shown['selectors_missing'])[:300]}")
+        if e.get("no_errors") and shown.get("errors"):
+            diffs.append(f"스크립트 오류: {shown['errors'][0][:200]}")
     return diffs
 
 
@@ -1163,10 +1172,11 @@ def case_commands(cases: list[dict]) -> dict[str, str]:
     out: dict[str, str] = {}
     for i, c in enumerate(cases):
         name = c.get("name") or f"#{i + 1}"
-        for side, spec in (c.get("call") or {}).items():
+        call = c.get("call") if isinstance(c.get("call"), dict) else {}
+        for side, spec in call.items():
             if isinstance(spec, dict) and spec.get("cmd"):
                 out[f"case {name} call.{side}.cmd"] = str(spec["cmd"])
-        for side, rt in (c.get("runtime") or {}).items():
+        for side, rt in (c.get("runtime") if isinstance(c.get("runtime"), dict) else {}).items():
             if rt:
                 out[f"case {name} runtime.{side}"] = str(rt)
     return out
@@ -1205,6 +1215,15 @@ def _load_cases(path: Path) -> tuple[dict, list[dict]]:
             hints = [CASE_KEY_HINTS[k] for k in sorted(unknown) if k in CASE_KEY_HINTS]
             raise ToolError("invalid_request", f"케이스 {name}: 모르는 키 {sorted(unknown)} — 무시하면 다른 입력으로 실행된다"
                             + (f" ({'; '.join(hints)})" if hints else ""), recovery=f"쓸 수 있는 키: {sorted(CASE_KEYS)}")
+        if isinstance(c.get("call"), str):  # "calc.js:total" 한 줄이면 대상(내 코드) 쪽 함수
+            if not re.fullmatch(r".+\.\w+:[\w.$]+", c["call"]):
+                raise ToolError("invalid_request", f"케이스 {name}: call 은 '파일:함수' 형식 (예: \"calc.js:calculateOrder\") — "
+                                f"받은 값 {c['call']!r}")
+            c["call"] = {"target": c["call"]}
+        if "call" in c and not isinstance(c["call"], dict):
+            raise ToolError("invalid_request", f"케이스 {name}: call 은 {{\"target\": \"파일:함수\"}} 또는 \"파일:함수\"")
+        if "runtime" in c and not isinstance(c["runtime"], dict):
+            raise ToolError("invalid_request", f"케이스 {name}: runtime 은 {{\"target\": \"python3\"}} 처럼 쪽별로")
         if ("args" in c or "kwargs" in c) and "call" not in c:
             raise ToolError("invalid_request", f"케이스 {name}: args·kwargs 는 함수 호출(call) 케이스용 — CLI 인자는 argv 로 적는다")
         if c.get("new") and not c.get("expect") and not c.get("invariant"):
@@ -1328,8 +1347,14 @@ def _run_side(cases: list[dict], side: _Side, *, url: str | None, cli: str | Non
               server: _Server | None = None) -> tuple[list[dict], dict]:
     saved: dict = {}
     out = []
+    shots = _screens_for(cases, side, url)  # 화면 케이스는 브라우저 엔진 하나로 한꺼번에
     for i, c in enumerate(cases):
         name = c.get("name") or f"case{i + 1}"
+        if "screen" in c:
+            res = shots.get(i) or {"status": None, "body": None, "error": "화면 확인 결과 없음"}
+            saved[name] = res["body"] if isinstance(res["body"], dict) else {"value": res["body"]}
+            out.append({"name": name, **res})
+            continue
         try:
             concrete = _template(c, saved)
         except ToolError as e:
@@ -1359,6 +1384,39 @@ def _run_side(cases: list[dict], side: _Side, *, url: str | None, cli: str | Non
         saved[name] = res["body"] if isinstance(res["body"], dict) else {"value": res["body"]}
         out.append({"name": name, **res})
     return out, saved
+
+
+def _screens_for(cases: list[dict], side: _Side, url: str | None) -> dict[int, dict]:
+    from oss_analyzer.core import screens
+
+    idx = [i for i, c in enumerate(cases) if "screen" in c]
+    if not idx:
+        return {}
+    if side.image:
+        return {i: {"status": None, "body": None, "error": "화면 케이스는 컨테이너 안에서는 아직 못 돌림 — trusted 로컬 실행으로"} for i in idx}
+    folder = getattr(side, "screens", None) or Path(tempfile.mkdtemp(prefix="screens-"))
+    folder.mkdir(parents=True, exist_ok=True)
+    out: dict[int, dict] = {}
+    with screens.serve_folder(side.cwd) as served:
+        pages = []
+        for i in idx:
+            c = cases[i]
+            name = re.sub(r"[^\w-]+", "_", c.get("name") or f"case{i + 1}")
+            try:
+                spec = screens.page_spec(c["screen"] if isinstance(c["screen"], dict) else {"path": str(c["screen"])}, url,
+                                         side.cwd, str(folder / f"{name}.png"), file_base=served.base)
+            except ToolError as e:
+                out[i] = {"status": None, "body": None, "error": e.message}
+                continue
+            e = c.get("expect") or {}
+            pages.append((i, {**spec, "visible": e.get("visible") or [], "selectors": e.get("selectors") or []}))
+        try:
+            got = screens.capture([p for _, p in pages])
+        except ToolError as e:
+            return {**out, **{i: {"status": None, "body": None, "error": e.message} for i, _ in pages}}
+    for (i, _), r in zip(pages, got):
+        out[i] = screens.to_result(r)
+    return out
 
 
 def _needs_exec(cases: list[dict], cmd: str | None, cli: str | None) -> bool:
@@ -1410,6 +1468,7 @@ def _run_source_cases(conn, proj, settings, port, cases, *, url, cmd, cli, trust
                       coverage_cmd=None, coverage_report=None) -> dict:
     work, copy = _source_side(settings, proj, cases, cmd=cmd, cli=cli, trusted=trusted, image=image)
     side = _Side("source", copy or Path("."), _harness_dir(settings), image)
+    side.screens = _port_dir(settings, proj, port["id"]) / "screens" / "source"
     server, adequacy = None, None
     try:
         if cmd:
@@ -1530,6 +1589,7 @@ def capture(conn, proj: dict, settings: Settings, port_id: str, cases_file: str,
     adq_id = run["adequacy"].get("check_id") if isinstance(run["adequacy"], dict) else None
     cid = "cap_" + uuid.uuid4().hex[:12]
     expectations = {c.get("name") or f"#{i}": {"expect": c["expect"], "new": bool(c.get("new")), "order": i,
+                                                 "description": c.get("description") or c.get("note"),
                                                  "input": {k: c[k] for k in CASE_INPUT_KEYS if k in c},
                                                  "source": None if r.get("new") else
                                                  {"status": r.get("status"), "body": json.dumps(r.get("body"), ensure_ascii=False)[:300]}}
@@ -1621,6 +1681,7 @@ def verify(conn, proj: dict, settings: Settings, port_id: str, *, target_url: st
     if not (target_url or target_cli or any("call" in c for c in cases)):
         raise ToolError("invalid_request", "target_url(HTTP) 또는 target_cli(명령) 이 필요함")
     side = _Side("target", root, _harness_dir(settings))
+    side.screens = _port_dir(settings, proj, port_id) / "screens" / "target"
     server, conc = None, None
     try:
         if target_cmd:
@@ -1658,6 +1719,7 @@ def verify(conn, proj: dict, settings: Settings, port_id: str, *, target_url: st
             diffs = []
         excused = [a["diffs_full"] for a in accepted if a["name"] == s["name"]] if why and not diffs else []
         rows.append({"name": s["name"], "ok": not diffs, "diffs": diffs, **({"generated": True} if c.get("generated") else {}),
+                     **({"screenshot": d["screenshot"]} if d.get("screenshot") else {}),
                      "actual": {"status": d.get("status"), "body": json.dumps(d.get("body"), ensure_ascii=False)[:300] if d.get("body") is not None else None,
                                 **({"error": str(d["error"])[:300]} if d.get("error") else {})},
                      **({"expected": "new" if c.get("new") else "changed"} if c.get("expect") else {}),

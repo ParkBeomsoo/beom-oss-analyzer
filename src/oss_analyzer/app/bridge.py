@@ -8,6 +8,8 @@ import getpass
 import json
 import os
 import subprocess
+import re
+import shutil
 import threading
 import time
 import traceback
@@ -63,6 +65,7 @@ class Api(QObject):
     def bootstrap(self):
         self._refresh_agents()
         return {"version": __version__, "agents": self._agents_now(), "runs": view.runs(self.settings),
+                "defaults": self._prefs().get("defaults") or {},
                 "kinds": inbox.KINDS, "default_policy": inbox.DEFAULT_POLICY,
                 "permission_modes": [{"id": k, "label": m["label"], "desc": m["desc"], "policy": m["policy"]}
                                      for k, m in inbox.PERMISSION_MODES.items()]}
@@ -139,10 +142,18 @@ class Api(QObject):
     @safe
     def createRun(self, payload):
         v = json.loads(payload)
+        if v.get("mode") == "plan" and not v.get("target_root"):
+            # 기획만 할 때는 폴더를 안 골라도 된다 — 문서 폴더 아래 (툴킷 홈은 에이전트가 쓸 수 없는 곳이라 안 됨)
+            slug = re.sub(r"[^\w가-힣-]+", "-", (v.get("request") or "plan").strip()[:30]).strip("-") or "plan"
+            docs_dir = Path.home() / "Documents"
+            base = (docs_dir if docs_dir.is_dir() else Path.home()) / "beom-oss-analyzer" / "기획"
+            v["target_root"] = str(base / f"{time.strftime('%Y%m%d-%H%M%S')}-{slug}")
         if not v.get("target_root"):
-            raise ToolError("invalid_request", "만들 곳(폴더)을 정해 주세요")
-        if v["mode"] == "request" and not v.get("request", "").strip():
-            raise ToolError("invalid_request", "만들 기능을 설명해 주세요")
+            raise ToolError("invalid_request", "작업할 폴더를 정해 주세요")
+        if v["mode"] in ("plan", "free") and not (v.get("request") or "").strip() and not v.get("attachments"):
+            raise ToolError("invalid_request", "무엇을 할지 적어 주세요")
+        if v["mode"] == "request" and not v.get("request", "").strip() and not v.get("attachments") and not v.get("urls"):
+            raise ToolError("invalid_request", "만들 기능을 설명하거나 기획서를 첨부해 주세요")
         if v["mode"] == "oss" and not v.get("source", "").strip():
             raise ToolError("invalid_request", "원본 저장소를 입력해 주세요")
         if v.get("auth") == "api_key":
@@ -151,10 +162,17 @@ class Api(QObject):
                 raise ToolError("not_ready", f"API 키 인증을 골랐지만 환경 변수({' 또는 '.join(names)})가 없습니다",
                                 recovery="키를 환경 변수로 넣고 앱을 다시 열거나, 인증을 '내 로그인'으로 두세요")
         threading.Thread(target=self._prepare, args=(v,), daemon=True).start()
+        try:  # 다음 새 작업은 이번 선택으로 시작 (Claude 고정이 아니라 쓰던 에이전트)
+            from oss_analyzer.core import storage
+            storage.save_prefs(self.settings, {"defaults": {k: v.get(k) for k in (
+                "agent", "model", "effort", "policy", "max_rounds", "plan_approval", "confirm_at", "auth") if k in v}})
+        except Exception:  # noqa: BLE001 — 기본값 저장 실패가 실행을 막지 않게
+            pass
         return {"preparing": True}
 
     def _prepare(self, v: dict) -> None:
         try:
+            v = {**v, "request": self._attach(v)}
             context = None
             if v.get("context_dir"):
                 opened = project.open_repo(self.settings, v["context_dir"])
@@ -164,17 +182,104 @@ class Api(QObject):
                 context = proj["id"]
             run = runner.create(self.settings, mode=v["mode"], target_root=v["target_root"], request=v.get("request", ""),
                                 name=v.get("name") or None, source=v.get("source"), feature=v.get("feature"),
-                                source_run=v.get("source_run"), context_project=context, max_rounds=int(v.get("max_rounds", 8)),
+                                source_run=v.get("source_run"), context_project=context, max_rounds=int(v.get("max_rounds") or 0),
                                 model=v.get("model") or None, auth=v.get("auth", "subscription"), policy=v.get("policy"),
                                 agent=v.get("agent", "claude"), plan_approval=bool(v.get("plan_approval", True)),
-                                effort=v.get("effort") or None)
+                                effort=v.get("effort") or None, confirm_at=v.get("confirm_at") or "start")
             if v["mode"] == "oss":
                 conn, proj = project.load(self.settings, run["project_id"])
                 if not proj.get("inventory_at"):
                     inventory.build(conn, self.settings, proj, False)
+            for note in getattr(self, "_attach_notes", []):
+                inbox.log(self.settings, run["id"], "note", text=note, tone="warn")
             self.created.emit(json.dumps({"run_id": run["id"], "start": bool(v.get("start", True))}))
         except Exception as e:  # noqa: BLE001
             self.created.emit(json.dumps({"error": getattr(e, "message", None) or f"{type(e).__name__}: {e}"}, ensure_ascii=False))
+
+    def _attach(self, v: dict) -> str:
+        """첨부한 기획서·문서·링크를 대상 폴더의 .oss/brief/ 에 두고 요청에 '먼저 읽으라'고 적는다 (에이전트 샌드박스 안).
+
+        docx·pptx·xlsx·hwpx 는 글로 바꾼 .md 를 함께 둔다. 링크는 공개 페이지면 글로 저장하고,
+        로그인이 필요하면 링크만 남겨 에이전트가 웹으로 읽게 한다 (웹 권한 규칙을 따름).
+        """
+        from oss_analyzer.core import docs
+
+        files = [Path(f) for f in v.get("attachments") or [] if f and not re.match(r"https?://", str(f))]
+        urls = [str(f).strip() for f in (v.get("attachments") or []) + (v.get("urls") or []) if re.match(r"https?://", str(f))]
+        request = (v.get("request") or "").strip()
+        self._attach_notes = []
+        if not files and not urls:
+            return request
+        brief = Path(v["target_root"]) / ".oss" / "brief"
+        brief.mkdir(parents=True, exist_ok=True)
+        names, links = [], []
+        for f in files:
+            if not f.is_file():
+                raise ToolError("not_found", f"첨부 파일이 없습니다: {f}")
+            if f.stat().st_size > 20 * 1024 * 1024:
+                raise ToolError("invalid_request", f"첨부 파일이 너무 큽니다 (20MB 까지): {f.name}")
+            shutil.copy2(f, brief / f.name)
+            text = docs.to_text(f)
+            if text:
+                md = brief / f"{f.name}.md"  # spec.docx → spec.docx.md (spec.md 나 기획 결과 기획서.md 와 겹치지 않게)
+                md.write_text(f"<!-- {f.name} 에서 뽑은 글 -->\n\n{text}", encoding="utf-8")
+                names.append(f".oss/brief/{md.name} (원본 {f.name})")
+            else:
+                names.append(f".oss/brief/{f.name}")
+        for i, url in enumerate(dict.fromkeys(urls), 1):
+            got = docs.fetch_url(url)
+            if got.get("ok"):
+                slug = re.sub(r"[^\w가-힣-]+", "-", got["title"])[:50].strip("-") or f"link-{i}"
+                md = brief / f"link-{slug}.md"
+                n = 2
+                while md.exists():
+                    md = brief / f"link-{slug}-{n}.md"
+                    n += 1
+                md.write_text(f"<!-- 출처: {url} -->\n\n# {got['title']}\n\n{got['text']}", encoding="utf-8")
+                names.append(f".oss/brief/{md.name} (출처 {url})")
+            else:
+                links.append(url)
+                why = "로그인이 필요한 페이지" if got.get("needs_login") else got.get("error", "가져오지 못함")
+                self._attach_notes.append(f"{url} — {why}라 내용을 가져오지 못했습니다. 에이전트가 웹으로 읽으려 하면 권한을 묻습니다 "
+                                          "(로그인이 필요한 문서는 내보내서 파일로 첨부하면 확실합니다).")
+        head = request or "첨부한 기획서대로 만든다."
+        out = head + "\n\n[첨부 문서 — 먼저 모두 읽고 요구사항·합격 기준에 반영한다. 문서와 요청이 다르면 묻는다]\n" + "\n".join(f"- {n}" for n in names)
+        if links:
+            out += "\n[링크 — 내용을 미리 받지 못했다. 웹으로 읽을 수 있으면 읽고, 못 읽으면 사용자에게 내용을 요청한다]\n" + "\n".join(f"- {u}" for u in links)
+        return out
+
+    @Slot(str, result=str)
+    @safe
+    def screenshot(self, path):
+        """검증이 남긴 스크린샷을 화면에 — 툴킷 홈 안의 png 만 (data: 주소로)."""
+        import base64
+        p = Path(path).resolve()
+        if p.suffix.lower() != ".png" or not inbox._inside(str(p), self.settings.home) or not p.is_file():
+            raise ToolError("invalid_request", "보여 줄 수 없는 파일")
+        if p.stat().st_size > 8 * 1024 * 1024:
+            raise ToolError("invalid_request", "스크린샷이 너무 큽니다")
+        return {"url": "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()}
+
+    @Slot(str, result=str)
+    @safe
+    def readBrief(self, run_id):
+        """기획 모드의 결과 문서 (.oss/brief/기획서.md) — 없으면 가장 최근에 바뀐 .md."""
+        run = inbox.load_run(self.settings, run_id)
+        brief = Path(run["target_root"]) / ".oss" / "brief"
+        main = brief / "기획서.md"
+        if not main.is_file():
+            mds = sorted(brief.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True) if brief.is_dir() else []
+            main = mds[0] if mds else None
+        if not main:
+            return {"path": None, "text": ""}
+        return {"path": str(main), "text": main.read_text(encoding="utf-8", errors="replace")[:400_000]}
+
+    @Slot(result=str)
+    @safe
+    def pickFiles(self):
+        files, _ = QFileDialog.getOpenFileNames(None, "기획서·문서 첨부", str(Path.home()),
+                                                "문서 (*.md *.txt *.pdf *.docx *.pptx *.xlsx *.hwpx *.json *.yaml *.yml *.csv *.png *.jpg);;모든 파일 (*)")
+        return files
 
     def _busy(self, run_id) -> bool:
         """이 창의 스레드든 다른 곳(CLI·다른 창)이든 지금 이 실행을 진행 중인가."""
@@ -187,8 +292,10 @@ class Api(QObject):
         if self._busy(run_id):
             return {"running": True}
 
-        def more_rounds(x):  # 사용자가 이어서 진행을 눌렀다 — 라운드를 다 썼으면 몇 개 더 준다
-            if int(x.get("round") or 0) >= int(x.get("max_rounds") or 8):
+        def more_rounds(x):  # 사용자가 이어서 진행을 눌렀다 — 라운드를 다 썼으면 몇 개 더 준다 (0 = 제한 없음)
+            if int(x.get("round") or 0) >= runner.HARD_ROUNDS:
+                x["round"] = 0  # 안전 상한에 걸렸던 실행 — 사람이 이어 가기로 했다
+            if x.get("max_rounds") and int(x.get("round") or 0) >= int(x["max_rounds"]):
                 x["max_rounds"] = int(x.get("round") or 0) + 4
 
         inbox.update_run(self.settings, run_id, more_rounds)
@@ -293,7 +400,9 @@ class Api(QObject):
             old = r.get("plan") or {}
             hist = (old.get("history") or []) + ([{"steps": old["steps"], "summary": old.get("summary")}] if old.get("steps") else [])
             r["plan"] = {"steps": steps, "summary": str(v.get("summary") or old.get("summary") or "").strip()[:1000],
-                         "approved": False, "history": hist[-5:], "at": view.now(), "edited_by": getpass.getuser()}
+                         "approved": False, "history": hist[-5:], "at": view.now(), "edited_by": getpass.getuser(),
+                         **({"design": str(v["design"] if v.get("design") is not None else old.get("design") or "")[:6000]}
+                            if (v.get("design") is not None or old.get("design")) else {})}
 
         inbox.update_run(self.settings, run_id, put)
         inbox.log(self.settings, run_id, "user_edit", what=f"계획 {len(steps)}단계")
@@ -403,16 +512,19 @@ class Api(QObject):
             if isinstance(v.get("policy"), dict):
                 r["policy"] = {k: (v["policy"].get(k) if v["policy"].get(k) in inbox.DECISIONS else r["policy"].get(k, "ask"))
                                for k in inbox.KINDS}
-            if v.get("max_rounds"):
-                r["max_rounds"] = max(int(r.get("round") or 0) + 1, min(100, int(v["max_rounds"])))
+            if "max_rounds" in v:
+                n = int(v["max_rounds"] or 0)
+                r["max_rounds"] = 0 if n <= 0 else max(int(r.get("round") or 0) + 1, min(500, n))
             if "plan_approval" in v:
                 r["plan_approval"] = bool(v["plan_approval"])
+            if v.get("confirm_at") in ("start", "end"):
+                r["confirm_at"] = v["confirm_at"]
 
         run = inbox.update_run(self.settings, run_id, put)
         inbox.log(self.settings, run_id, "options", model=run.get("model"), mode=inbox.mode_of(run["policy"]),
                   max_rounds=run.get("max_rounds"))
         return {"model": run.get("model"), "effort": run.get("effort"), "policy": run["policy"], "max_rounds": run.get("max_rounds"),
-                "plan_approval": run.get("plan_approval", True)}
+                "plan_approval": run.get("plan_approval", True), "confirm_at": run.get("confirm_at", "start")}
 
     @Slot(str, result=str)
     @safe

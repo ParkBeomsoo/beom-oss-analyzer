@@ -58,10 +58,14 @@ def mode_of(policy: dict) -> str:
         if all(policy.get(kind) == v for kind, v in m["policy"].items()):
             return k
     return "custom"
+
+
+# 정확히 이 줄만 '빌드'로 바로 허용 — 덧붙인 인자는 실행기를 바꿀 수 있다 (go test -exec, yarn dlx, pytest -p 등).
+# 그 밖의 줄은 '그 밖의 명령'으로 규칙에 따라 묻는다.
 BUILD_COMMANDS = re.compile(
-    r"^(npm (ci|install|test|run (build|test|lint))|pnpm (install|test|build)|yarn( install| test| build)?|"
-    r"cargo (build|test|check|fmt|clippy)|go (build|test|vet)|mvn( -q)? (test|package|verify)|gradle(w)? (test|build)|"
-    r"\./gradlew (test|build)|pytest|python -m pytest|py -m pytest|uv run pytest|pip install -e \.|dotnet (build|test))\b")
+    r"^(npm (ci|install|test|run (build|test|lint))|pnpm (install|test|build)|yarn (install|test|build)|"
+    r"cargo (build|test|check|fmt|clippy)|go (build|test|vet)( \./\.\.\.)?|mvn( -q)? (test|package|verify)|gradlew? (test|build)|"
+    r"\./gradlew (test|build)|pytest|python -m pytest|py -m pytest|uv run pytest|pip install -e \.|dotnet (build|test))\s*$")
 PUBLISH = re.compile(r"\b(git\s+push|npm\s+publish|cargo\s+publish|twine\s+upload|docker\s+push|gh\s+release|kubectl\s+apply|helm\s+(install|upgrade))\b")
 SYSTEM = re.compile(r"\b(setx|reg(\.exe)?\s+add|sudo|chmod\s+-R\s+/|systemctl|launchctl|netsh|Set-ExecutionPolicy|OSS_ANALYZER_)\b", re.I)
 CHAINING = re.compile(r"[\n\r&|;`<>]|\$\(|\$\{")
@@ -273,7 +277,7 @@ def _cmd_inside(cmd: str, root: Path) -> bool:
 
 # ---------------------------------------------------------------- 질문함
 
-def ask(settings: Settings, run_id: str, kind: str, payload: dict, timeout: float = 3600, poll: float = 0.5) -> dict:
+def ask(settings: Settings, run_id: str, kind: str, payload: dict, timeout: float = 24 * 3600, poll: float = 0.5) -> dict:
     """사람에게 묻고 답을 기다린다. kind: permission | question. 답이 없으면 timeout 뒤 거절로 본다."""
     rid = secrets.token_hex(6)
     d = run_dir(settings, run_id) / "inbox"

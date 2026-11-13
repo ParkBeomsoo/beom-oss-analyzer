@@ -65,11 +65,13 @@ def create(settings: Settings, where: tuple[str, ...] = LOCATIONS, icon: Path | 
             raise ToolError("capability_unavailable", "이 운영체제에서는 바로가기를 만들 수 없음")
         dst.parent.mkdir(parents=True, exist_ok=True)
         if sys.platform == "win32":
-            script = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut(" + _ps_quote(dst) + "); "
-                      f"$s.TargetPath = {_ps_quote(exe)}; $s.WorkingDirectory = {_ps_quote(settings.home)}; "
-                      "$s.Description = '오픈소스 분석·요청사항 만들기·검증'; "
-                      + (f"$s.IconLocation = {_ps_quote(str(icon) + ',0')}; " if icon and icon.is_file() else "") + "$s.Save()")
-            proc = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=60)
+            # 경로는 환경 변수로 넘긴다 — 스크립트 글자에 넣으면 경로 속 따옴표(’ 등)가 명령으로 읽힐 수 있다
+            env = dict(os.environ, OSS_LNK=str(dst), OSS_EXE=str(exe), OSS_HOME=str(settings.home),
+                       OSS_ICON=(str(icon) + ",0") if icon and icon.is_file() else "")
+            script = ("$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:OSS_LNK); "
+                      "$s.TargetPath = $env:OSS_EXE; $s.WorkingDirectory = $env:OSS_HOME; "
+                      "$s.Description = 'beom-oss-analyzer'; if ($env:OSS_ICON) { $s.IconLocation = $env:OSS_ICON }; $s.Save()")
+            proc = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True, timeout=60, env=env)
             if proc.returncode != 0 or not dst.is_file():
                 raise ToolError("internal", f"바로가기를 만들지 못함: {(proc.stderr or proc.stdout).strip()[-300:]}")
         else:

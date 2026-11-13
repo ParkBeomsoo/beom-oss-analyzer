@@ -84,7 +84,7 @@ def load_prefs(settings: Settings) -> dict:
 
 
 def save_prefs(settings: Settings, patch: dict) -> dict:
-    allowed = {"trash_days", "cleanup_days", "shortcut_dismissed", "defaults"}
+    allowed = {"trash_days", "cleanup_days", "shortcut_dismissed", "defaults"}  # defaults: 새 작업에 쓸 지난 선택
     bad = set(patch) - allowed
     if bad:
         raise ToolError("invalid_request", f"모르는 설정: {sorted(bad)}")
@@ -168,9 +168,13 @@ def trash_run(settings: Settings, run_id: str) -> dict:
 
 
 def restore_run(settings: Settings, name: str) -> dict:
+    import re
+
+    if not re.fullmatch(r"run_[0-9a-f]{12}-\d{14}", name or ""):
+        raise ToolError("invalid_request", f"휴지통 항목 이름이 아님: {name}")
     src = trash_dir(settings) / name
     run_id = name.split("-")[0]
-    if not src.is_dir() or not run_id.startswith("run_"):
+    if not src.is_dir() or src.resolve().parent != trash_dir(settings).resolve():
         raise ToolError("not_found", f"휴지통에 없음: {name}")
     from oss_analyzer.core import inbox
 
@@ -221,7 +225,8 @@ def prune_runs(settings: Settings, days: int, dry_run: bool = False) -> dict:
     picked = []
     for r in inbox.list_runs(settings):
         d = inbox.run_dir(settings, r["id"])
-        finished = (r.get("status") == "done" and r.get("accepted")) or r.get("archived")
+        idle = r.get("status") not in ("running", "waiting_approval", "waiting_plan", "waiting_answer", "waiting_input", "preparing")
+        finished = (r.get("status") == "done" and r.get("accepted")) or (r.get("archived") and idle)
         if finished and _last_activity(d) < limit and runner.lock_owner(settings, r["id"]) is None:
             picked.append(r["id"])
     if not dry_run:

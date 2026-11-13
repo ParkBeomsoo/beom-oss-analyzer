@@ -29,6 +29,57 @@ def _mcp_server(settings, run: dict) -> dict:
             "env": {"OSS_ANALYZER_RUN": run["id"], "OSS_ANALYZER_HOME": str(settings.home)}}
 
 
+def _mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _tail_value(files: list[Path], pick, tail: int = 256_000):
+    """JSONL 파일 끝부분에서 pick(event) 가 돌려주는 마지막 값 — 큰 대화 기록도 끝만 읽는다."""
+    for f in files:
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - tail))
+                lines = fh.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            try:
+                v = pick(json.loads(line))
+            except (ValueError, AttributeError):
+                continue
+            if v:
+                return v
+    return None
+
+
+def _newest_codex_sessions(root: Path, n: int = 3) -> list[Path]:
+    """sessions/YYYY/MM/DD/*.jsonl — 가장 최근 날짜 폴더부터 몇 개만 (전체를 훑지 않는다)."""
+    out: list[Path] = []
+    try:
+        for y in sorted(root.iterdir(), reverse=True):
+            for m in sorted(y.iterdir(), reverse=True):
+                for d in sorted(m.iterdir(), reverse=True):
+                    out += sorted(d.glob("*.jsonl"), key=_mtime, reverse=True)
+                    if len(out) >= n:
+                        return out[:n]
+    except OSError:
+        pass
+    return out[:n]
+
+
+def _claude_alias(model: str) -> str:
+    """claude-opus-5-5 → opus (Claude Code 가 받는 별칭). 별칭이 없는 모델은 그대로."""
+    m = model.lower()
+    for a in ("opus", "sonnet", "haiku"):
+        if a in m:
+            return a
+    return model
+
+
 def _which(*names: str) -> str | None:
     for n in names:
         p = shutil.which(n)
@@ -78,6 +129,10 @@ class Agent:
 
     def efforts(self) -> dict[str, list[dict]]:
         """모델별로 고를 수 있는 생각 깊이(노력). 키 "" 는 기본 모델. 비어 있으면 이 에이전트는 설정 없음."""
+        return {}
+
+    def current(self) -> dict:
+        """모델·노력을 고르지 않았을 때 실제로 쓰이는 값 — 에이전트 설정 파일, 없으면 최근에 실제로 쓴 모델."""
         return {}
 
     def env(self, run: dict) -> dict:
@@ -137,6 +192,23 @@ class ClaudeCode(Agent):
         # 별칭은 Claude Code 가 그때의 최신 모델로 풀어 준다
         return [{"id": "", "label": "기본값", "note": "계정 설정을 따름"}, {"id": "opus", "label": "Opus", "note": "가장 강함"},
                 {"id": "sonnet", "label": "Sonnet", "note": "균형"}, {"id": "haiku", "label": "Haiku", "note": "빠름"}]
+
+    def current(self) -> dict:
+        home = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+        try:
+            s = json.loads((home / "settings.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            s = {}
+        if not isinstance(s, dict):
+            s = {}
+        if s.get("model"):
+            return {"model": _claude_alias(s["model"]), "effort": s.get("effortLevel"), "source": "Claude 설정"}
+        dirs = sorted((d for d in (home / "projects").glob("*") if d.is_dir()), key=_mtime, reverse=True)[:3]
+        files = sorted((f for d in dirs for f in d.glob("*.jsonl")), key=_mtime, reverse=True)[:3]
+        used = _tail_value(files, lambda e: (e.get("message") or {}).get("model"))
+        if used and used != "<synthetic>":
+            return {"model": _claude_alias(used), "full": used, "effort": s.get("effortLevel"), "source": "최근 사용"}
+        return {}
 
     def efforts(self) -> dict[str, list[dict]]:
         levels = [{"id": "low", "label": "낮음", "desc": "빠르게"}, {"id": "medium", "label": "보통", "desc": "일상 작업"},
@@ -241,6 +313,28 @@ class Codex(Agent):
                         "levels": [{"id": x.get("effort"), "label": _EFFORT_KO.get(x.get("effort"), x.get("effort")), "desc": x.get("description", "")}
                                    for x in m.get("supported_reasoning_levels") or [] if x.get("effort")]})
         return out
+
+    def current(self) -> dict:
+        home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+        cfg = {}
+        try:
+            import tomllib
+            cfg = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+        except (OSError, ValueError, ImportError):
+            pass
+        model, source = cfg.get("model"), "Codex 설정"
+        if not model:
+            files = _newest_codex_sessions(home / "sessions")
+            model = _tail_value(files, lambda e: (e.get("payload") or {}).get("model") if e.get("type") == "turn_context" else None)
+            source = "최근 사용"
+        if not model:
+            ms = self.models()
+            model, source = (ms[1]["id"] if len(ms) > 1 else None), "Codex 기본"
+        effort = cfg.get("model_reasoning_effort")
+        if not effort:
+            m = next((x for x in self.models() if x["id"] == model), {})
+            effort = m.get("default_effort")
+        return {"model": model, "effort": effort, "source": source} if model else {}
 
     def efforts(self) -> dict[str, list[dict]]:
         ms = self.models()
@@ -354,13 +448,17 @@ def statuses(check: bool = True) -> list[dict]:
     for cls in AGENTS.values():
         if not check:
             a = cls()
+            try:
+                cur = a.current()
+            except Exception:  # noqa: BLE001 — 설정 파일이 이상해도 앱은 연다
+                cur = {}
             out.append({"id": cls.id, "name": cls.name, "ready": None, "exe": a.exe, "permission_hook": cls.permission_hook,
-                        "note": cls.note, "models": a.models(), "efforts": a.efforts()})
+                        "note": cls.note, "models": a.models(), "efforts": a.efforts(), "current": cur})
             continue
         try:
             a = cls()
             out.append({**a.status(), "permission_hook": cls.permission_hook, "note": cls.note, "models": a.models(),
-                        "efforts": a.efforts()})
+                        "efforts": a.efforts(), "current": a.current()})
         except Exception as e:  # noqa: BLE001 — 한 에이전트 확인 실패가 목록을 막지 않게
             out.append({"id": cls.id, "name": cls.name, "ready": False, "hint": f"{type(e).__name__}: {e}"})
     return out

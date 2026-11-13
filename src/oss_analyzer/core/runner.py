@@ -92,16 +92,45 @@ RULES = """너는 beom-oss-analyzer 툴킷의 자동 실행 단계에서 일하�
 - 사용자에게 물어볼 것은 mcp__oss-analyzer__oss_person_ask 로 묻는다. 추측으로 요구사항을 정하지 않는다.
   답을 받기 전에 라운드가 끝나면, 그 질문에 기대는 일은 하지 말고 끝낸다 — 답은 다음 라운드 지시로 온다. 같은 질문을 다시 하지 않는다.
 - 기대값은 사용자 요청·원본에서 정하고, 구현 출력을 베껴 기대값으로 만들지 않는다.
-- 합격 케이스 파일 형식: {"cases": [{"name": "이름", 입력, "req": "R1" 또는 ["R1", "R2"], "expect": {...}}]}
-  입력 — CLI: "argv": ["3"] (+ "stdin"), HTTP: "method", "path", "json", 함수: "call" + "args". 
+- 합격 케이스 파일 형식: {"cases": [{"name": "짧은_id", "description": "사람이 읽는 설명", 입력, "req": "R1" 또는 ["R1", "R2"], "expect": {...}}]}
+  description 은 사용자 요청과 같은 언어로, 무엇을 넣으면 어떻게 되는지 한 줄 (예: "수량 10개 — 여기서부터 10% 할인").
+  사용자는 name 이 아니라 description 을 본다. name 은 공백 없는 짧은 id.
+  입력 — CLI: "argv": ["3"] (+ "stdin"), HTTP: "method", "path", "json",
+  함수: "call": "calc.js:calculateOrder" (파일:함수, 대상 폴더 기준) + "args": [3] — 돌려준 값은 body 로 비교한다. 
   expect — "status"(종료 코드 또는 HTTP 상태), "body"(출력 JSON 전체가 같음), "equals"({"a.b": 값} 일부 필드), "match"(정규식).
   정해진 키 밖의 키는 거절된다 (조용히 무시되면 다른 입력으로 검증되기 때문).
+- 화면이 있는 작업(웹·앱 화면)은 화면 케이스도 둔다: {"name": "home", "description": "첫 화면 — 주문 버튼이 보인다",
+  "screen": {"path": "/"} (서버) 또는 {"file": "index.html"} (파일), 모바일은 "mobile": true, "req": "R3",
+  "expect": {"visible": ["주문하기"], "selectors": ["form button"], "no_errors": true}}. 검증하면 스크린샷이 남아 사용자가 본다.
+- 화면 디자인: 계획(oss_plan_set)에 design 으로 디자인 방향을 함께 낸다 — 사용자가 준 브랜드·참고·첨부를 우선하고, 없으면 제품 성격에 맞는
+  방향 하나(톤, 색 3~5개, 글꼴, 간격 단위, 모서리, 참고할 서비스, 피할 것)를 정한다. 구현은 그 방향을 디자인 토큰(한 파일)으로 두고 그것만 쓴다.
+  이미 쓰는 프레임워크·컴포넌트 라이브러리·디자인 시스템이 있으면 그것을 따른다.
+  피할 것(AI 티): 근거 없는 보라·파랑 그라데이션, 이모지 아이콘, 모든 것을 카드로 감싸기, 의미 없는 큰 문구, 과한 그림자·유리 효과,
+  같은 무게로 나열된 요소, 가짜 문구(Lorem ipsum), 가운데 정렬 남발. 지킬 것: 제목·본문·보조 3단 위계, 정렬과 일정한 간격,
+  실제 문구, 빈 상태·로딩·오류 상태, 키보드 포커스, 글자 대비 4.5:1, 모바일 폭.
 - 작업은 대상 폴더 안에서만 한다. 툴킷 원장·실행 폴더·설정을 직접 고치지 않는다.
 - 지금 하는 일은 mcp__oss-analyzer__oss_activity 로 한 줄씩 알린다 (예: "order.rs 에 할인 계산 추가 중").
 - 구현 전에는 계획(oss_plan_set: 단계마다 제목·바꿀 파일·실행할 명령)을 내고 승인을 기다린다. 구현 중에는 단계마다
   oss_plan_progress 로 진행을 표시한다.
 - 완료 조건을 모두 채우면 oss_handoff 로 인수인계(바뀐 것, 실행 방법, 남은 위험)를 남긴다.
 - 이번 라운드에서 할 수 있는 만큼 진행하고, 마지막에 한두 문장으로 한 일과 남은 일을 말한다."""
+
+
+FREE_RULES = """너는 사용자의 개발 에이전트다. 사용자가 보낸 요청을 그대로 수행한다 (툴킷의 절차·승인 단계는 쓰지 않는다).
+- 작업은 대상 폴더 안에서 한다. 툴킷 원장·실행 폴더·설정은 건드리지 않는다.
+- 꼭 필요할 때만 mcp__oss-analyzer__oss_person_ask 로 묻는다. 끝나면 한두 문장으로 한 일과 남은 일을 말한다."""
+
+PLAN_RULES = """너는 기획자다. 사용자의 아이디어를 바로 만들 수 있는 기획서로 정리한다. 코드는 쓰지 않는다.
+- 결과는 대상 폴더의 .oss/brief/기획서.md 하나에 쓴다 (마크다운). 사용자의 언어로 쓴다.
+- 꼭 필요한 질문은 처음에 한 번에 묶어서(번호를 붙여 최대 5개) mcp__oss-analyzer__oss_person_ask 로 묻고, 나머지는 합리적으로
+  가정한 뒤 '열린 질문·가정' 절에 적는다. 첨부 문서가 있으면 먼저 모두 읽고 반영한다.
+- 기획서 목차:
+  # 제목 / ## 한 줄 요약 / ## 배경과 목표 / ## 사용자와 사용 장면 / ## 기능 목록 (P0 꼭 · P1 있으면 좋음 · P2 나중)
+  / ## 화면과 흐름 (화면마다 보이는 것·할 수 있는 것·빈 상태·오류 상태) / ## 요구사항 (R1, R2 … 확인할 수 있는 문장)
+  / ## 합격 기준 (요구사항마다 '이렇게 하면 이렇게 된다' 예시) / ## 디자인 방향 (톤·색·글꼴·참고할 서비스, 피할 것)
+  / ## 범위 밖 / ## 열린 질문·가정 / ## 단계 (작게 나눈 순서)
+- 다 쓰면 mcp__oss-analyzer__oss_handoff 로 남긴다: summary=기획 한 단락, how_to_run=".oss/brief/기획서.md",
+  risks=남은 질문·위험. 사용자가 고칠 점을 보내면 기획서를 고치고 다시 oss_handoff 를 남긴다."""
 
 
 def _brief(run: dict, st: dict | None) -> str:
@@ -145,19 +174,24 @@ def _brief(run: dict, st: dict | None) -> str:
 
 def create(settings: Settings, *, mode: str, target_root: str, request: str = "", name: str | None = None,
            source: str | None = None, feature: str | None = None, source_run: str | None = None,
-           context_project: str | None = None, max_rounds: int = 8, model: str | None = None,
+           context_project: str | None = None, max_rounds: int = 0, model: str | None = None,
            auth: str = "subscription", policy: dict | None = None, agent: str = "claude",
-           plan_approval: bool = True, effort: str | None = None) -> dict:
+           plan_approval: bool = True, effort: str | None = None, confirm_at: str = "start") -> dict:
     """실행 준비 — 요청사항 모드는 원장까지 만들고, 오픈소스 모드는 원본 저장소를 열어 둔다(인벤토리는 첫 단계에서)."""
-    if mode not in ("request", "oss"):
-        raise ToolError("invalid_request", "mode 는 request 또는 oss")
+    if mode not in ("request", "oss", "plan", "free"):
+        raise ToolError("invalid_request", "mode 는 request · oss · plan(기획) · free(자유 대화)")
     Path(target_root).mkdir(parents=True, exist_ok=True)
     meta = {"mode": mode, "target_root": str(Path(target_root).resolve()), "request": request.strip(), "name": name or "project",
             "feature": feature, "source_run": source_run, "context_project": context_project, "max_rounds": max_rounds,
             "model": model, "auth": auth, "project_id": None, "port_id": None, "session_id": None, "policy": policy or {},
-            "agent": agent, "plan_approval": plan_approval, "messages": [], "effort": effort or None}
+            "agent": agent, "plan_approval": plan_approval, "messages": [], "effort": effort or None,
+            # start: 처음에 기준과 계획을 한 번에 확인하고 끝까지 / end: 멈추지 않고 만든 뒤 마지막에 한 번 확인
+            "confirm_at": confirm_at if confirm_at in ("start", "end") else "start"}
     agents_mod.get(agent)  # 모르는 에이전트면 여기서 거절
-    if mode == "request":
+    if mode in ("plan", "free"):
+        if not request.strip():
+            raise ToolError("invalid_request", "무엇을 할지 적어 주세요")
+    elif mode == "request":
         if not request.strip():
             raise ToolError("invalid_request", "요청사항이 비어 있음")
         made = make.create(settings, name=meta["name"], request=request, target_root=target_root, context=context_project,
@@ -188,6 +222,10 @@ def status(settings: Settings, run: dict) -> dict | None:
 LOCK_FILE = "runner.lock"
 LOCK_BEAT_SEC = 10
 LOCK_STALE_SEC = 45
+STALL_ROUNDS = 3   # 이만큼 연속으로 기록·계획·대상 폴더가 그대로면 멈춘다
+HARD_ROUNDS = 100  # '제한 없음'이어도 이 이상은 돌지 않는다 (비용 안전장치) — 메시지를 보내면 이어 간다
+# 에이전트가 이만큼 아무 출력이 없고 사용자에게 묻는 중도 아니면 이번 라운드를 끝낸다 (멈춘 프로세스가 영원히 붙잡지 않게)
+ROUND_IDLE_SEC = int(os.environ.get("OSS_ANALYZER_ROUND_IDLE", "1800"))
 STOP_FILE = "stop.request"
 
 
@@ -291,8 +329,12 @@ class Runner:
     def _set(self, **kw) -> dict:
         return inbox.update_run(self.settings, self.run_id, lambda r: r.update(kw))
 
+    def _rules(self, run: dict) -> str:
+        return {"free": FREE_RULES, "plan": PLAN_RULES}.get(run.get("mode"), RULES)
+
     def _turn(self, run: dict, prompt: str) -> dict:
-        argv, env = self.agent.command(self.settings, run, prompt, RULES)
+        rules = self._rules(run)
+        argv, env = self.agent.command(self.settings, run, prompt, rules)
         inbox.log(self.settings, self.run_id, "round_start", round=run["round"], agent=self.agent.id, prompt=prompt[:3000])
         feed_stdin = getattr(self.agent, "stdin_prompt", False)
         # stderr 는 파일로 — 파이프로 두면 에이전트가 로그를 많이 쓸 때 양쪽이 서로 기다리며 멈춘다
@@ -302,14 +344,28 @@ class Runner:
                                      stdout=subprocess.PIPE, stderr=err_file)
         if feed_stdin:
             try:
-                self.proc.stdin.write(self.agent.stdin_text(run, prompt, RULES).encode("utf-8"))
+                self.proc.stdin.write(self.agent.stdin_text(run, prompt, rules).encode("utf-8"))
                 self.proc.stdin.close()
             except OSError:
                 pass
         result = {}
         texts: list[str] = []
         self.tools_used = 0
+        last = {"t": time.monotonic()}
+        proc = self.proc
+
+        def watchdog():
+            while proc.poll() is None:
+                time.sleep(15)
+                if time.monotonic() - last["t"] > ROUND_IDLE_SEC and not inbox.pending(self.settings, self.run_id):
+                    inbox.log(self.settings, self.run_id, "note", tone="warn",
+                              text=f"에이전트가 {ROUND_IDLE_SEC // 60}분 동안 아무 출력이 없어 이번 라운드를 끝냈습니다")
+                    kill_tree(proc)
+                    return
+
+        threading.Thread(target=watchdog, daemon=True).start()
         for raw in self.proc.stdout:
+            last["t"] = time.monotonic()
             try:
                 ev = json.loads(raw.decode("utf-8", "replace"))
             except json.JSONDecodeError:
@@ -386,6 +442,8 @@ class Runner:
         run = self._set(status="running")
         if run["round"] == 0:
             self._checkpoint(run, "시작 전")
+        if run["mode"] in ("free", "plan"):
+            return self._run_simple()
         stalls = 0
         finish_tries = 0
         while not self._stop.is_set():
@@ -400,30 +458,39 @@ class Runner:
                 inbox.log(self.settings, self.run_id, "finished", gates=st["gates"])
                 continue
             waiting = st and port.pending_reviews(project.load(self.settings, run["project_id"])[0], run["port_id"])
-            # 승인·계획 대기 중에 사용자가 고칠 점을 보내면 승인하지 않은 채로 그 내용을 반영하는 라운드를 돈다
-            if waiting and run["round"] > 0 and "승인" in st["next_step"] and not self._new_messages():
-                self._set(status="waiting_approval")
-                inbox.log(self.settings, self.run_id, "waiting_approval", items=len(waiting))
-                if not self._wait(lambda: self._new_messages() or not port.pending_reviews(
-                        project.load(self.settings, run["project_id"])[0], run["port_id"])):
-                    break
-                run = self._set(status="running")
-                continue
+            end_mode = run.get("confirm_at", "start") == "end"
+            only_human_left = bool(st) and all(v for k, v in st["gates"].items() if k != port.GATE_HUMAN)
             plan = run.get("plan") or {}
-            if (run.get("plan_approval", True) and plan.get("steps") and not plan.get("approved") and self._spec_settled(run)
-                    and not self._new_messages()):
-                self._set(status="waiting_plan")
-                inbox.log(self.settings, self.run_id, "waiting_plan", steps=len(plan["steps"]))
-                if not self._wait(lambda: self._new_messages() or (inbox.load_run(self.settings, self.run_id).get("plan")
-                                                                   or {}).get("approved")):
-                    break
-                run = self._set(status="running")
-                continue
+            plan_needed = run.get("plan_approval", True) and not end_mode
+            plan_pending = bool(plan_needed and plan.get("steps") and not plan.get("approved"))
+            spec_ready = bool(waiting) or self._spec_settled(run)  # 기준을 저장했다 (승인 전이든 후든)
+            # 처음에 한 번: 기준(+계획)이 모두 나오면 한 번 멈춰 함께 승인받고, 그 뒤로는 끝까지 간다
+            # 마지막에 한 번: 승인 말고 다른 조건이 다 채워졌을 때만 멈춘다
+            # 멈춘 동안 사용자가 고칠 점을 보내면 승인하지 않은 채로 반영하는 라운드를 돈다
+            if run["round"] > 0 and not self._new_messages():
+                gate_wait = bool(waiting) and "승인" in st["next_step"]
+                stop = (gate_wait and only_human_left) if end_mode else (
+                    (gate_wait or plan_pending) and spec_ready and (not plan_needed or bool(plan.get("steps"))))
+                if stop:
+                    self._set(status="waiting_approval")
+                    inbox.log(self.settings, self.run_id, "waiting_approval", items=len(waiting or []) + int(plan_pending))
+
+                    def settled():
+                        r = inbox.load_run(self.settings, self.run_id)
+                        p = r.get("plan") or {}
+                        need = r.get("plan_approval", True) and r.get("confirm_at", "start") != "end"
+                        open_plan = need and p.get("steps") and not p.get("approved")
+                        return not port.pending_reviews(project.load(self.settings, r["project_id"])[0], r["port_id"]) and not open_plan
+
+                    if not self._wait(lambda: self._new_messages() or settled()):
+                        break
+                    run = self._set(status="running")
+                    continue
             if inbox.pending(self.settings, self.run_id):
                 if not self._settle_orphans():
                     break
                 continue
-            if run["round"] >= run["max_rounds"]:
+            if (run.get("max_rounds") and run["round"] >= run["max_rounds"]) or run["round"] >= HARD_ROUNDS:  # 0 = 제한 없음 (헛돌면 따로 멈춘다)
                 inbox.log(self.settings, self.run_id, "max_rounds", round=run["round"])
                 return self._set(status="stopped_max_rounds")
             run = self._set(round=run["round"] + 1)
@@ -433,11 +500,20 @@ class Runner:
             if revising:
                 prompt += ("\n\n이번 라운드: 사용자가 승인하지 않고 고칠 점을 보냈다. 위 요청대로 요구사항·합격 케이스"
                            "(다시 oss_port_capture) 또는 계획(oss_plan_set)을 고치고 끝낸다. 승인은 사람만 한다.")
+            elif run["round"] == 1 and run["mode"] == "request" and end_mode:
+                prompt += ("\n\n이번 라운드: 요청을 요구사항(oss_make_requirements)으로 나누고, 요구사항마다 합격 케이스 파일을 "
+                           "대상 폴더의 .oss/cases.json 에 써서 oss_port_capture 로 저장한 뒤, 승인을 기다리지 말고 계획(oss_plan_set)·"
+                           "구현·검증(oss_port_map, oss_port_verify)까지 이어서 한다. 사용자는 마지막에 한 번 확인한다. "
+                           "진행을 막는 질문만 하고, 나머지는 합리적으로 가정한 뒤 oss_activity 로 '가정: …'을 남긴다.")
             elif run["round"] == 1 and run["mode"] == "request":
                 prompt += ("\n\n이번 라운드: 요청을 요구사항(oss_make_requirements)으로 나누고, 요구사항마다 합격 케이스 파일을 "
-                           "대상 폴더의 .oss/cases.json 에 써서 oss_port_capture 로 저장한다. 애매한 점은 먼저 묻는다. "
-                           "구현은 사용자 승인 뒤에 한다.")
-            elif self._spec_settled(run) and not (run.get("plan") or {}).get("steps"):
+                           "대상 폴더의 .oss/cases.json 에 써서 oss_port_capture 로 저장한 뒤, 구현 계획(oss_plan_set)까지 낸다. "
+                           "사용자는 기준과 계획을 처음에 한 번에 확인하고, 그 뒤로는 끝날 때까지 맡긴다. 애매한 점은 지금 묻는다. "
+                           + ("구현은 사용자 승인 뒤에 한다." if run.get("plan_approval", True) else "계획 없이 바로 구현해도 된다 — 기준 승인 뒤에."))
+            elif end_mode and not (st and st["complete"]) and not only_human_left:
+                prompt += ("\n\n이번 라운드: 사용자 확인은 마지막에 한 번 받는다 — 승인을 기다리지 말고 남은 구현·검증을 진행해 "
+                           "승인 말고 다른 완료 조건을 모두 채운다. 진행을 막는 질문만 한다.")
+            elif (self._spec_settled(run) or (waiting and plan_needed)) and not (run.get("plan") or {}).get("steps"):
                 prompt += "\n\n이번 라운드: 구현 계획을 oss_plan_set 으로 낸다 (단계·바꿀 파일·실행할 명령). 코드는 아직 바꾸지 않는다."
             elif st and st["complete"] and not run.get("handoff"):
                 prompt += "\n\n이번 라운드: 완료 조건을 모두 채웠다. oss_handoff 로 인수인계를 남긴다 (코드는 바꾸지 않는다)."
@@ -447,9 +523,10 @@ class Runner:
             result = self._turn(run, prompt)
             run = inbox.load_run(self.settings, self.run_id)
             self._checkpoint(run, f"라운드 {run['round']}")
-            if self.tools_used == 0 and self._progress_sig(run) == before and not inbox.pending(self.settings, self.run_id):
+            # 진전 판단은 기록·계획·대상 폴더가 바뀌었는지로만 (활동 알림·읽기만 한 라운드는 진전이 아니다)
+            if self._progress_sig(run) == before and not inbox.pending(self.settings, self.run_id):
                 stalls += 1
-                if stalls >= 2:
+                if stalls >= STALL_ROUNDS:
                     inbox.log(self.settings, self.run_id, "stalled", round=run["round"])
                     return self._set(status="stopped_max_rounds", stalled=True)
             else:
@@ -458,11 +535,57 @@ class Runner:
                 inbox.log(self.settings, self.run_id, "round_error", subtype=result.get("subtype"))
         return self._set(status="stopped")
 
+    def _run_simple(self) -> dict:
+        """자유 대화·기획: 원장·완료 조건 없이 — 메시지마다 한 번 돌고(자유), 기획서를 남기면 끝(기획)."""
+        stalls = 0
+        while not self._stop.is_set():
+            run = inbox.load_run(self.settings, self.run_id)
+            if run["mode"] == "plan" and run.get("handoff") and not self._new_messages():
+                return self._set(status="done")
+            if inbox.pending(self.settings, self.run_id):
+                if not self._settle_orphans():
+                    break
+                continue
+            if run["mode"] == "free" and run["round"] > 0 and not self._new_messages():
+                self._set(status="waiting_input")
+                if not self._wait(self._new_messages):
+                    break
+                self._set(status="running")
+                continue
+            if run.get("max_rounds") and run["round"] >= run["max_rounds"]:
+                inbox.log(self.settings, self.run_id, "max_rounds", round=run["round"])
+                return self._set(status="stopped_max_rounds")
+            run = self._set(round=run["round"] + 1)
+            msgs = [m for m in run.get("messages") or [] if not m.get("delivered")]
+            if run["round"] == 1:
+                prompt = run.get("request") or ""
+                if msgs:
+                    prompt += "\n\n" + "\n".join(m["text"] for m in msgs)
+                if run["mode"] == "plan":
+                    prompt = f"[기획할 것]\n{prompt}\n\n[대상 폴더] {run['target_root']}"
+            else:
+                prompt = "\n\n".join(m["text"] for m in msgs) or "이어서 진행한다."
+            self._mark_delivered([(m.get("at"), m.get("text")) for m in msgs])
+            before = self._progress_sig(run)
+            self._turn(run, prompt)
+            run = inbox.load_run(self.settings, self.run_id)
+            self._checkpoint(run, f"라운드 {run['round']}")
+            if run["mode"] == "plan" and self._progress_sig(run) == before:
+                stalls += 1
+                if stalls >= STALL_ROUNDS:
+                    inbox.log(self.settings, self.run_id, "stalled", round=run["round"])
+                    return self._set(status="stopped_max_rounds", stalled=True)
+            else:
+                stalls = 0
+        return self._set(status="stopped")
+
     def _progress_sig(self, run: dict) -> str:
         """라운드 사이에 무언가 진행됐는지 — 원장 기록 끝, 계획·인수인계, 대상 폴더 스냅샷."""
         try:
-            conn, _ = project.load(self.settings, run["project_id"])
-            head = conn.execute("SELECT log_head FROM port WHERE id = ?", (run.get("port_id"),)).fetchone() if run.get("port_id") else None
+            head = None
+            if run.get("project_id") and run.get("port_id"):
+                conn, _ = project.load(self.settings, run["project_id"])
+                head = conn.execute("SELECT log_head FROM port WHERE id = ?", (run["port_id"],)).fetchone()
         except ToolError:
             head = None
         cps = Checkpoints(inbox.run_dir(self.settings, self.run_id), run["target_root"]).list()
@@ -514,7 +637,9 @@ class Runner:
         return True
 
     def _new_messages(self) -> bool:
-        return any(not m.get("delivered") for m in inbox.load_run(self.settings, self.run_id).get("messages") or [])
+        """사용자가 새로 보낸 메시지가 있나 — 앱에서 직접 고쳤다는 알림(from=edit)은 깨우지 않고 다음 라운드에 함께 전한다."""
+        return any(not m.get("delivered") and m.get("from") != "edit"
+                   for m in inbox.load_run(self.settings, self.run_id).get("messages") or [])
 
     def _mark_delivered(self, sent: list[tuple]) -> None:
         """이번 지시에 실은 메시지만 전달됨으로 — 지시를 만든 뒤 들어온 메시지는 다음 라운드로 넘긴다."""
