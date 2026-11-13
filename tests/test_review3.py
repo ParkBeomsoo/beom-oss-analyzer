@@ -64,3 +64,31 @@ def test_shortcut_script_takes_paths_from_the_environment():
     from oss_analyzer.core import shortcut
     src = inspect.getsource(shortcut.create)
     assert "$env:OSS_LNK" in src and "_ps_quote(" not in src  # 경로가 스크립트 글자로 들어가지 않는다
+
+
+def test_screen_cases_need_an_isolated_copy_on_the_source_side():
+    from oss_analyzer.core import port
+    assert port._needs_exec([{"name": "a", "screen": {"file": "index.html"}}], None, None) is True
+
+
+def test_served_folder_and_brief_refuse_symlinks_out(tmp_path, settings):
+    import os
+    import urllib.error
+    import urllib.request
+    site = tmp_path / "site"
+    site.mkdir()
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    try:
+        os.symlink(tmp_path / "secret.txt", site / "leak.txt")
+    except (OSError, NotImplementedError):
+        pytest.skip("이 시스템에서는 심볼릭 링크를 만들 수 없음")
+    with screens.serve_folder(site) as s:
+        with pytest.raises(urllib.error.HTTPError):
+            urllib.request.urlopen(s.base + "/leak.txt", timeout=5)
+    from oss_analyzer.app.bridge import Api
+    run = inbox.new_run(settings, {"mode": "plan", "target_root": str(site)})
+    brief = site / ".oss" / "brief"
+    brief.mkdir(parents=True)
+    os.symlink(tmp_path / "secret.txt", brief / "기획서.md")
+    out = json.loads(Api(settings).readBrief(run["id"]))
+    assert not out["ok"]

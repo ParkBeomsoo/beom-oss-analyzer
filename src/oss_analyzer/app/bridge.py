@@ -272,6 +272,9 @@ class Api(QObject):
             main = mds[0] if mds else None
         if not main:
             return {"path": None, "text": ""}
+        # 에이전트가 만든 파일이다 — 심볼릭 링크나 폴더 밖을 가리키면 읽지 않는다
+        if main.is_symlink() or not inbox._inside(str(main.resolve()), brief.resolve()):
+            raise ToolError("invalid_request", "기획서 파일이 기획 폴더 밖을 가리킵니다")
         return {"path": str(main), "text": main.read_text(encoding="utf-8", errors="replace")[:400_000]}
 
     @Slot(result=str)

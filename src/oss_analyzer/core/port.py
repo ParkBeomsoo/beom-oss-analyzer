@@ -1394,6 +1394,8 @@ def _screens_for(cases: list[dict], side: _Side, url: str | None) -> dict[int, d
         return {}
     if side.image:
         return {i: {"status": None, "body": None, "error": "화면 케이스는 컨테이너 안에서는 아직 못 돌림 — trusted 로컬 실행으로"} for i in idx}
+    if str(side.cwd) in (".", "") or not Path(side.cwd).is_dir():  # 사본이 없으면 현재 폴더를 내보내지 않는다
+        return {i: {"status": None, "body": None, "error": "화면 케이스를 돌릴 폴더(대상 또는 원본 사본)가 없음"} for i in idx}
     folder = getattr(side, "screens", None) or Path(tempfile.mkdtemp(prefix="screens-"))
     folder.mkdir(parents=True, exist_ok=True)
     out: dict[int, dict] = {}
@@ -1420,7 +1422,8 @@ def _screens_for(cases: list[dict], side: _Side, url: str | None) -> dict[int, d
 
 
 def _needs_exec(cases: list[dict], cmd: str | None, cli: str | None) -> bool:
-    return bool(cmd or cli or any("call" in c for c in cases))
+    # 화면 케이스도 원본 코드를 브라우저로 실행한다 — 격리된 사본(또는 trusted)이 있어야 한다
+    return bool(cmd or cli or any("call" in c or "screen" in c for c in cases))
 
 
 def _source_side(settings: Settings, proj: dict, cases: list[dict], *, cmd: str | None, cli: str | None,

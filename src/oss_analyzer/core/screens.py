@@ -50,13 +50,21 @@ class serve_folder:
             def log_message(self, *a):
                 pass
 
+            def translate_path(self, path):  # 심볼릭 링크로 대상 폴더 밖 파일을 읽지 못하게 — 실제 위치가 밖이면 없는 파일로
+                full = super().translate_path(path)
+                real, base = os.path.realpath(full), os.path.realpath(root_str)
+                if real != base and not real.startswith(base.rstrip(os.sep) + os.sep):
+                    return os.path.join(base, "__outside__")
+                return full
+
             def guess_type(self, path):  # 글자 파일은 UTF-8 이라고 알려 준다 (meta charset 이 없는 페이지의 한글이 깨지지 않게)
                 t = super().guess_type(path)
                 if t.startswith("text/") or t in ("application/javascript", "application/json", "image/svg+xml"):
                     t += "; charset=utf-8"
                 return t
 
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=str(root)))
+        root_str = str(root)
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=root_str))
         self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
 
     def __enter__(self):
