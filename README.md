@@ -1,315 +1,454 @@
 # beom-oss-analyzer
 
-**오픈소스를 빠짐없이 분석하고, 필요한 기능만 내 저장소로 옮겨 원본과 같은지 검증하는 툴킷**
+**English** | [한국어](README.ko.md) | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
 
-![version](https://img.shields.io/badge/version-0.2.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![license](https://img.shields.io/badge/license-use%20only%2C%20no%20modification-lightgrey)
+**A toolkit that analyzes open-source code exhaustively, lets you port just the features you need into your own repository, and verifies the port behaves like the original.**
 
-남이 만든 기능을 "대충 읽고 따라 만들기" 대신, 코드 전체를 근거(파일:줄)와 함께 분석하고
-옮긴 결과가 원본과 같은 동작인지 프로그램으로 확인합니다. Claude Code 같은 AI 에이전트가 절차를 따라 쓰도록
-스킬·MCP 도구·CLI 를 함께 제공하고, AI 가 혼자 정하면 안 되는 일은 사람 승인 없이는 끝나지 않게 막습니다.
+![version](https://img.shields.io/badge/version-0.3.0-blue) ![python](https://img.shields.io/badge/python-3.11%2B-blue) ![license](https://img.shields.io/badge/license-use%20only%2C%20no%20modification-lightgrey)
 
-## 목차
+Instead of skimming someone else's feature and imitating it, the toolkit analyzes the whole codebase with evidence
+(file:line) for every conclusion, and checks by program that what you ported behaves the same as the original.
+It ships a skill, MCP tools and a CLI so that AI agents such as Claude Code follow the procedure, and it blocks
+completion of anything an AI should not decide alone until a human approves it.
 
-- [무엇을 하나](#무엇을-하나)
-- [핵심 개념](#핵심-개념)
-- [요구 사항](#요구-사항)
-- [설치](#설치)
-- [빠른 시작 ① 저장소 전수 분석](#빠른-시작--저장소-전수-분석)
-- [빠른 시작 ② 기능 옮기기와 검증](#빠른-시작--기능-옮기기와-검증)
-- [원본을 고쳐 쓰는 경우 (커스텀)](#원본을-고쳐-쓰는-경우-커스텀)
-- [케이스 파일 형식](#케이스-파일-형식)
-- [명령 요약](#명령-요약)
-- [설정](#설정)
-- [안전 원칙](#안전-원칙)
-- [알려진 한계](#알려진-한계)
-- [라이선스](#라이선스)
+## Contents
 
-## 무엇을 하나
+- [What it does](#what-it-does)
+- [Key concepts](#key-concepts)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Desktop app and automatic runs](#desktop-app-and-automatic-runs)
+- [Quick start 1: analyze a whole repository](#quick-start-1-analyze-a-whole-repository)
+- [Quick start 2: port a feature and verify it](#quick-start-2-port-a-feature-and-verify-it)
+- [Quick start 3: build from a request](#quick-start-3-build-from-a-request)
+- [Customizing the original in place](#customizing-the-original-in-place)
+- [Case file format](#case-file-format)
+- [Command summary](#command-summary)
+- [Data and storage](#data-and-storage)
+- [Configuration](#configuration)
+- [Safety principles](#safety-principles)
+- [Known limitations](#known-limitations)
+- [License](#license)
 
-| 하고 싶은 일 | 툴킷이 하는 일 |
+## What it does
+
+| You want to | The toolkit |
 |---|---|
-| **기능을 빠짐없이 파악** | 모든 파일을 분류하고 모든 함수를 검토 단위로 나눠, 결론마다 근거(파일:줄)를 붙입니다. 확정하지 못한 것은 "미확인 목록"으로 남깁니다. |
-| **실제 API 목록** | 프레임워크별 규칙으로 HTTP·CLI 진입점을 찾고, 코드에서 조립되는 URL 까지 펼쳐 실제 경로 목록을 만듭니다. |
-| **고치기 전 영향 확인** | 바꾸려는 함수가 어디에 영향을 주는지(호출자·구현체·진입점·테스트), 코어를 건드리지 않고 끼울 수 있는 확장 포인트가 어디인지 보여 줍니다. |
-| **원본 업데이트 따라가기** | 두 버전을 비교해 우리 수정과 부딪히는 곳(함수 삭제·이름 변경·시그니처 변경)을 찾습니다. |
-| **기능만 골라 옮기기** | 진입점 하나에서 필요한 코드·상태·설정·외부 의존을 잘라 내고, 항목마다 어디로 옮겼는지 원장에 기록합니다. 다른 언어로 다시 만들어도 됩니다. |
-| **옮긴 결과 검증** | 같은 입력을 원본과 내 코드에 넣어 결과를 비교합니다(HTTP·CLI·함수 단위). 일부러 바꾼 동작은 기대값과, 원본에 없는 새 동작도 기대값으로 검증합니다. |
-| **AI 지름길 차단** | 차이 허용·기능 생략·테스트 축소·기대값은 사람 승인 전까지 완료가 안 됩니다. 검증 뒤 코드가 바뀌거나 기록을 툴킷 밖에서 고치면 잡아냅니다. |
+| **Understand every feature** | Classifies every file, splits every function into review units, and attaches evidence (file:line) to each conclusion. Anything it cannot confirm goes to an "unknowns" list. |
+| **Get the real API list** | Finds HTTP and CLI entry points with per-framework rules and expands URLs assembled in code into the actual route list. |
+| **See impact before changing** | Shows what a function you plan to change affects (callers, implementations, entry points, tests) and where you can plug in without touching the core (extension points). |
+| **Follow upstream updates** | Compares two versions and finds where upstream changes collide with your modifications (removed, renamed or re-signed functions). |
+| **Port only the feature** | Cuts out the code, state, configuration and external dependencies one entry point needs, and records in a ledger where each item went. The target may be a different language. |
+| **Verify the port** | Feeds the same inputs to the original and to your code and compares the results (HTTP, CLI or function level). Intentionally changed behavior is checked against expected values, and new behavior that does not exist in the original can be checked the same way. |
+| **Build what you ask for** | Starting from "build a feature like this" with no original, it gets requirements and acceptance criteria approved first, then verifies the build meets them and survives odd input. |
+| **Block AI shortcuts** | Accepted differences, omitted parts, reduced test cases and expected values cannot complete without human approval. Code changed after verification, or records edited outside the toolkit, are detected. |
 
-## 핵심 개념
+## Key concepts
 
-**근거 등급** — 결론이 얼마나 확실한지를 등급으로 남깁니다.
+**Evidence levels** — how certain a conclusion is.
 
-| 등급 | 뜻 | 얻는 방법 |
+| Level | Meaning | How |
 |---|---|---|
-| L0 | 코드를 읽고 구조 지도로 확인 | 기본 |
-| L1 | 언어 서버로 호출·참조 확인 | `lsp` |
-| L2 | 값이 어디서 어디로 흐르는지 확인 | `dataflow` |
-| L3 | 실제로 실행되는 것을 확인 | 커버리지 리포트, 차등 검증 |
+| L0 | Read the code and confirmed with the structure map | default |
+| L1 | Calls/references confirmed by a language server | `lsp` |
+| L2 | Where a value flows from and to is confirmed | `dataflow` |
+| L3 | Confirmed to actually execute | coverage report, differential verification |
 
-**원장** — 분석·포팅 상태는 프로젝트별 SQLite 원장(`~/.oss-analyzer/projects/<id>/ledger.db`)에 쌓입니다.
-세션이 바뀌어도, 여러 에이전트가 동시에 일해도 같은 기록을 이어 씁니다.
+**Ledger** — analysis and porting state accumulates in a per-project SQLite ledger (`~/.oss-analyzer/projects/<id>/ledger.db`).
+New sessions and several agents working in parallel continue the same record.
 
-**포팅 완료 조건 (게이트 7개)** — 전부 충족해야 `port-finish` 가 완료 판정을 냅니다.
+**Porting gates (7)** — `port-finish` issues a completion verdict only when all are met.
 
-1. 옮길 항목이 모두 처리됨 (옮김 / 대체 / 생략)
-2. 옮긴 위치가 지금도 그대로 있음 (줄 내용까지)
-3. 차등 검증 통과 — 마지막으로 저장한 케이스 전부, **지금 코드 기준** (검증 뒤 코드가 바뀌면 무효)
-4. 케이스가 옮길 함수를 모두 실행함 (원본 커버리지, 안 되면 내 코드 커버리지)
-5. 사람 확인 항목이 모두 승인됨 (차이 허용·생략·케이스 변경·기대값, 승인 뒤 내용이 바뀌면 무효)
-6. 기록이 툴킷 밖에서 바뀌지 않음 (원장 해시 사슬·골든 해시)
-7. 라이선스 확인이 필요한 파일이 없음
+1. Every item to port is handled (ported / replaced / omitted)
+2. Ported locations still exist (down to the line content)
+3. Differential verification passes — all cases of the last capture, **against the current code** (invalid if the code changed afterwards)
+4. Cases execute every function being ported (original coverage, or your code's coverage when the original cannot be instrumented)
+5. Every item needing human review is approved (accepted differences, omissions, case changes, expected values; invalid if the content changes after approval)
+6. Records were not changed outside the toolkit (ledger hash chain, golden hash)
+7. No files need a license review
 
-모든 포팅 명령 응답에는 `next_step`(다음에 할 일)이 붙습니다.
+Every porting command response includes `next_step` (what to do next).
 
-## 요구 사항
+## Requirements
 
-| 구분 | 내용 |
+| Category | Details |
 |---|---|
-| 필수 | Python 3.11+, git |
-| 필수 엔진 | 구조 지도 엔진, 진입점 규칙 엔진 — `setup` 이 설치 (체크섬 검증) |
-| 선택 | 언어 서버(L1), 데이터 흐름 엔진(L2, JDK 21+), 커버리지 도구(L3), 컨테이너 엔진(남의 코드 격리 실행) |
-| 언어 서버(L1) | Rust · Java · Kotlin · TypeScript/JavaScript · Python · Go · C/C++ · C# · Dart · Ruby (그 밖의 언어는 L0 까지, 파일·심볼 분류는 언어와 무관) |
-| 진입점 규칙 | Axum · Spring · Express · FastAPI/Flask · Gin · clap · Next.js (규칙이 없는 프레임워크는 자동으로 미확인 처리) |
+| Required | Python 3.11+, git |
+| Required engines | structure-map engine and entry-point rule engine — installed by `setup` (checksum verified) |
+| Optional | language servers (L1), data-flow engine (L2, JDK 21+), coverage tools (L3), container engine (isolated execution of third-party code) |
+| Language servers (L1) | Rust · Java · Kotlin · TypeScript/JavaScript · Python · Go · C/C++ · C# · Dart · Ruby (other languages up to L0; file and symbol classification is language independent) |
+| Entry-point rules | Axum · Spring · Express · FastAPI/Flask · Gin · clap · Next.js (frameworks without rules are automatically recorded as unknowns) |
 
-엔진 이름·라이선스·설치 위치는 [THIRD_PARTY.md](THIRD_PARTY.md) 에 있습니다.
+Engine names, licenses and install locations are listed in [THIRD_PARTY.md](THIRD_PARTY.md).
 
-## 설치
+## Installation
 
 ```bash
-# 1. 툴킷 설치 — 어느 폴더에서나 oss-analyzer 명령으로 쓸 수 있게
+# 1. Install the toolkit so the oss-analyzer command works from any folder
 pipx install git+https://github.com/ParkBeomsoo/beom-oss-analyzer.git
-# (또는) uv tool install git+https://github.com/ParkBeomsoo/beom-oss-analyzer.git
+# (or) uv tool install git+https://github.com/ParkBeomsoo/beom-oss-analyzer.git
 
-# 2. 상태 점검 — 엔진·언어 서버·스킬·MCP 등록
+# 2. Check status — engines, language servers, skill, MCP registration
 oss-analyzer doctor
 
-# 3. 엔진 설치 — 먼저 계획만 보고, 고른 것만 설치
+# 3. Install engines — look at the plan first, then install only what you pick
 oss-analyzer setup --languages python typescript
 oss-analyzer setup --apply codebase-memory-mcp ast-grep lsp:python lsp:typescript coverage
 ```
 
-- `setup` 은 아무 옵션 없이 실행하면 **계획만** 보여 주고 아무것도 바꾸지 않습니다. `--apply` 에 적은 것만 설치합니다.
-- 남의 코드를 격리해서 실행하려면 컨테이너 엔진이 필요합니다. Windows 는 `setup --apply sandbox` 가 WSL 배포판 안에
-  컨테이너 엔진을 설치합니다 (데스크톱 앱 불필요). 이미 `docker` 가 있으면 그것을 씁니다.
-- JDK·Node.js·Go·Rust 같은 언어 런타임은 직접 설치합니다.
+- Without options, `setup` only **shows a plan** and changes nothing. Only the items you list after `--apply` are installed.
+- Running third-party code in isolation needs a container engine. On Windows, `setup --apply sandbox` installs a container
+  engine inside a WSL distribution (no desktop app required). An existing `docker` is used if present.
+- Install language runtimes (JDK, Node.js, Go, Rust) yourself.
 
-### AI 에이전트(Claude Code) 연동
+### AI agent (Claude Code) integration
 
-둘 중 하나만 씁니다.
+Use one of the two.
 
 ```bash
-# A. setup 으로 스킬 + MCP 등록
+# A. Register the skill + MCP with setup
 oss-analyzer setup --apply skill mcp-register
-oss-analyzer setup --apply skill mcp-register --scope project --project-dir <프로젝트>   # 한 프로젝트에서만
+oss-analyzer setup --apply skill mcp-register --scope project --project-dir <project>   # one project only
 
-# B. Claude Code 플러그인 (툴킷은 위 1번으로 먼저 설치)
+# B. Claude Code plugin (install the toolkit with step 1 first)
 claude plugin marketplace add ParkBeomsoo/beom-oss-analyzer
 claude plugin install beom-oss-analyzer@beom-oss-analyzer
 ```
 
-- 스킬은 설치한 사본에 버전을 남겨, 툴킷이 업데이트되면 `doctor` 가 `outdated` 로 알려 줍니다.
-- 같은 이름의 스킬을 직접 만들어 두었거나 다른 설치를 가리키는 MCP 등록이 있으면 덮어쓰지 않고 알려 줍니다.
-- MCP 없이 CLI 만 써도 됩니다. 승인·완료 판정 같은 규칙은 CLI 에서도 똑같이 동작합니다.
+- The installed skill copy records its version, so `doctor` reports `outdated` after a toolkit update.
+- A skill with the same name you created yourself, or an MCP registration pointing at another installation, is never overwritten — you are told instead.
+- You can use the CLI alone without MCP. Rules such as approval and completion verdicts behave the same in the CLI.
 
-### 업데이트와 제거
+### Update and removal
 
 ```bash
-pipx upgrade oss-analyzer
-oss-analyzer setup --update                      # 이미 설치한 스킬만 새 버전으로 (새로 설치하지 않음)
-oss-analyzer setup --remove skill mcp-register   # 이 툴킷이 설치·등록한 것만 되돌림
-pipx uninstall oss-analyzer
+pipx upgrade beom-oss-analyzer
+oss-analyzer setup --update                      # refresh only the skill you already installed (installs nothing new)
+oss-analyzer setup --remove skill mcp-register   # undo only what this toolkit installed or registered
+pipx uninstall beom-oss-analyzer
 ```
 
-## 빠른 시작 ① 저장소 전수 분석
-
-**AI 에이전트에게 맡길 때** — Claude Code 에서:
-
-> 이 저장소 전수 분석해줘 https://github.com/<조직>/<저장소>
-
-스킬이 아래 절차를 따라 진행하고, 큰 저장소는 서브에이전트 여러 개가 단위를 나눠 병렬로 분석합니다.
-
-**CLI 로 직접 할 때**
+## Desktop app and automatic runs
 
 ```bash
-oss-analyzer open https://github.com/<조직>/<저장소> --ref v1.2.0   # 분석 전용 clone, 커밋 고정 → project_id
-oss-analyzer inventory <pid>                    # 파일 분류·심볼·구조 지도·진입점·분석 단위
-oss-analyzer features <pid>                     # 실제 URL·CLI 진입점 목록
+pipx install "beom-oss-analyzer[app] @ git+https://github.com/ParkBeomsoo/beom-oss-analyzer.git"
+beom-oss-analyzer                    # open the app
+oss-analyzer app --shortcut          # add Start menu (search) + desktop shortcuts; --remove-shortcut removes them
+```
 
-# 분석 루프 (단위가 없을 때까지 반복)
-oss-analyzer next <pid> --agent a1              # 다음 단위 받기
+The first time you open the app it also offers to create the shortcuts. On Linux it writes a `.desktop` entry.
+
+**Pick a mode on the home screen**
+
+| Mode | When | Stages |
+|---|---|---|
+| **Request based** | Build a feature like this (no original to follow) | requirements → acceptance criteria → plan → build → verify → handoff |
+| **Open-source based** | Bring a feature of a repository into my project | analyze → scope → record original → plan → build → compare → handoff |
+
+In open-source mode only the repository URL (or path) is required. Describe the feature in the text box, or leave it empty —
+the agent then lists the repository's features and asks you to pick one.
+
+**Agent, model, effort** — one button next to the send button.
+
+| Agent | Notes |
+|---|---|
+| Claude Code | asks per action through the toolkit's permission rules. Models: default · Opus · Sonnet · Haiku (aliases always resolve to the latest), effort low → max |
+| Codex | blocks with its sandbox instead of per-action questions (writes only inside the target folder). Models and effort levels come from the list Codex keeps for your account, so new models appear automatically |
+| Gemini CLI | experimental; no effort setting |
+
+Any other model name can be typed in. Model and effort can be changed during a run (applied from the next round).
+
+**Permissions** — pick a mode; the per-kind rules are under *Options → Permissions*.
+
+| Mode | Behaviour |
+|---|---|
+| Ask everything | every edit and command is confirmed |
+| Allow edits (default) | edits inside the target folder and build/test commands run directly; other commands and the web are confirmed |
+| Auto | commands run without asking too; only the web and files outside the folder are confirmed — use for trusted work |
+
+Push, publish, deleting outside the folder and system changes are always refused. Commands the agent passes to verification tools
+(including commands inside case files) go through the same rules. Auth: *my login* (subscription) or *API key* (reads the key from an
+environment variable, billed per use) — both can do the same things.
+
+**What you decide** — only these appear as cards:
+
+- **Requirements and acceptance criteria**, then the **plan**: *Approve*, *Edit* (change requirements, cases or plan steps yourself, then
+  *Save and approve* — recorded in the ledger as written by you and passed on to the agent), or type a correction in the message box
+  (the agent revises without approval).
+- The agent's **questions** and **permission requests** (`Y` allow · `N` refuse).
+- The **handoff** at the end: accept, or keep going by sending a message — sending a message to a stopped or finished run continues it.
+
+Approvals are written to the ledger inside the app only, bound to exactly what was shown; there is no approval endpoint the agent can reach.
+
+**Right panel**
+
+| Tab | Shows |
+|---|---|
+| Status | progress, plan steps, requirements, completion conditions |
+| Criteria | what was agreed — requirements, acceptance cases (input → expected), plan, and who approved them when |
+| Checks | what was verified — per requirement, each case's input → expected → actual result, and what every completion condition means |
+| Changes | changed files and diffs, per-file revert, checkpoints (the target folder is snapshotted every round; restore any point) |
+
+**Rounds** — one round is one agent session. A typical request takes 4–6 rounds (more with questions or revisions); the default limit
+is 8. A run that makes no progress for two rounds stops by itself, and you can always continue with a message, so the limit is only a cost cap.
+
+**Where data lives** — everything stays on your computer. See [Data and storage](#data-and-storage).
+
+Without the app: `oss-analyzer run --mode request --target-root <folder> --request "<request>"` (`--agent codex`, `--resume <run>`); answer in the app.
+
+Install Claude Code by the [official guide](https://code.claude.com/docs) and run `claude auth login`; Codex with `npm i -g @openai/codex`
+and `codex login` (check with `oss-analyzer agent-status`). Use a subscription login for your own use on your own computer; use an API key
+to serve other people ([Anthropic terms](https://code.claude.com/docs/en/legal-and-compliance)).
+
+## Quick start 1: analyze a whole repository
+
+**Delegating to an AI agent** — in Claude Code:
+
+> Analyze this whole repository: https://github.com/<org>/<repo>
+
+The skill follows the procedure below. For large repositories several sub-agents split the units and analyze in parallel.
+
+**Using the CLI directly**
+
+```bash
+oss-analyzer open https://github.com/<org>/<repo> --ref v1.2.0   # analysis-only clone pinned to a commit → project_id
+oss-analyzer inventory <pid>                    # file classes, symbols, structure map, entry points, analysis units
+oss-analyzer features <pid>                     # actual URL and CLI entry-point list
+
+# analysis loop (repeat until no units are left)
+oss-analyzer next <pid> --agent a1              # take the next unit
 oss-analyzer context <pid> <unit_id> --agent a1 --raw
-oss-analyzer finding <pid> <unit_id> --agent a1 --json finding.json   # 결론 + 근거
-oss-analyzer unknown-add <pid> --agent a1 --json unknown.json        # 확정 못 한 것
-oss-analyzer complete <pid> <unit_id> --agent a1 --summary "이 단위가 하는 일"
+oss-analyzer finding <pid> <unit_id> --agent a1 --json finding.json   # conclusion + evidence
+oss-analyzer unknown-add <pid> --agent a1 --json unknown.json        # what could not be confirmed
+oss-analyzer complete <pid> <unit_id> --agent a1 --summary "what this unit does"
 
-oss-analyzer coverage <pid>                     # 파일·심볼 2축 완료율과 실패 항목
-oss-analyzer unknowns <pid>                     # 남은 미확인
-oss-analyzer export <pid>                       # Markdown + JSON 리포트
+oss-analyzer coverage <pid>                     # completion on both axes (files, symbols) and failing items
+oss-analyzer unknowns <pid>                     # remaining unknowns
+oss-analyzer export <pid>                       # Markdown + JSON report
 ```
 
-`finding.json` 예:
+`finding.json` example:
 
 ```json
-{"text": "주문 생성 시 재고를 먼저 잠그고 결제 실패 시 해제한다", "severity": "important",
+{"text": "Order creation locks stock first and releases it when payment fails", "severity": "important",
  "evidence": [{"path": "src/order/service.rs", "start_line": 120, "end_line": 158}],
  "symbol_ids": ["s_1a2b3c"]}
 ```
 
-## 빠른 시작 ② 기능 옮기기와 검증
+## Quick start 2: port a feature and verify it
 
-예: 원본의 `POST /api/v1/orders` 를 내 저장소에 다른 언어로 옮기는 경우.
+Example: porting the original's `POST /api/v1/orders` into your repository in another language.
 
 ```bash
-# 1. 옮길 범위 보기 → 포팅 원장 만들기
+# 1. See the scope → create a porting ledger
 oss-analyzer slice <pid> "POST /api/v1/orders"
-oss-analyzer port-create <pid> --name 주문 --targets "POST /api/v1/orders" --language javascript --target-root <내 저장소>
+oss-analyzer port-create <pid> --name orders --targets "POST /api/v1/orders" --language javascript --target-root <your repo>
 
-# 2. 원본 응답 저장 (골든) — 원본은 컨테이너에서 격리 실행
+# 2. Save the original's responses (golden) — the original runs isolated in a container
 oss-analyzer port-capture <pid> <port_id> --cases cases.json \
-    --source-image <원본 실행 이미지> --source-url http://127.0.0.1:18001 --source-cmd "<원본 서버 실행 명령>" \
-    --coverage-cmd "<커버리지 리포트 생성 명령>" --coverage-report cov.json --explore 40
+    --source-image <image that runs the original> --source-url http://127.0.0.1:18001 --source-cmd "<command that starts the original server>" \
+    --coverage-cmd "<command that writes the coverage report>" --coverage-report cov.json --explore 40
 
-# 3. 내 코드 작성 → 항목마다 어디로 옮겼는지 기록
+# 3. Write your code → record where each item went
 oss-analyzer port-map <pid> <port_id> --json map.json
 
-# 4. 비교 검증 (동시 요청까지)
+# 4. Differential verification (including concurrent requests)
 oss-analyzer port-verify <pid> <port_id> --target-url http://127.0.0.1:18002 --target-cmd "node server.js" --concurrency 8
 
-# 5. 진행 상황과 다음 할 일
+# 5. Progress and next step
 oss-analyzer port-status <pid> <port_id>
 
-# 6. 사람 승인 — 사용자가 터미널에서 직접 실행 (에이전트가 대신 실행하면 거부됨)
+# 6. Human approval — the user runs this in a terminal (refused when an agent runs it)
 oss-analyzer port-approve <pid> <port_id>
 
-# 7. 완료 판정 — 게이트 7개가 모두 충족될 때만 발급
+# 7. Completion verdict — issued only when all 7 gates are met
 oss-analyzer port-finish <pid> <port_id>
 ```
 
-`map.json` 예 — 옮김(`ported`)은 내 코드의 `경로:줄`, 대체·생략은 사유가 필요합니다.
+`map.json` example — `ported` needs a `path:line` in your code; `replaced` and `omitted` need a reason.
 
 ```json
 [{"item": "s_1a2b3c", "status": "ported", "target": "src/orders/create.js:12"},
- {"item": "s_4d5e6f", "status": "replaced", "note": "원본 큐 대신 기존 메시지 서비스 사용"},
- {"item": "s_7a8b9c", "status": "omitted", "note": "관리자 통계는 이번 범위 밖"}]
+ {"item": "s_4d5e6f", "status": "replaced", "note": "use the existing message service instead of the original queue"},
+ {"item": "s_7a8b9c", "status": "omitted", "note": "admin statistics are out of scope"}]
 ```
 
-**옮긴 기능을 바꿔서 가져오기**
+**Porting with changes**
 
-| 상황 | 방법 | 판정 |
+| Situation | How | Verdict |
 |---|---|---|
-| 원본과 같아야 함 | 케이스만 작성 | 원본 응답과 비교 |
-| 일부러 다르게 만듦 (값을 정할 수 있음) | 케이스에 `expect` | 원본 대신 기대값과 비교, 기대값은 사람 승인 |
-| 원본에 없는 새 동작 | `"new": true` + `expect` | 원본은 실행하지 않고 기대값으로 판정 |
-| 형식만 다르고 값은 못 정함 | `port-accept --case <이름> --reason "<사유>"` | 차이 허용 제안 → 사람 승인 |
-| 기능 일부를 뺌 | `port-map` 에서 `omitted` + 사유 | 사람 승인 |
+| Must match the original | just write the case | compared with the original response |
+| Intentionally different (value can be specified) | `expect` on the case | compared with the expected value instead of the original; expected value needs human approval |
+| New behavior not in the original | `"new": true` + `expect` | the original is not run; judged by the expected value |
+| Only the format differs, value cannot be specified | `port-accept --case <name> --reason "<reason>"` | proposed accepted difference → human approval |
+| Part of the feature is dropped | `omitted` + reason in `port-map` | human approval |
 
-- 승인 화면에는 원본 응답과 기대값(또는 실제 차이)이 나란히 나옵니다. 승인 뒤 내용이 바뀌면 다시 승인해야 합니다.
-- 원본을 커버리지로 계측할 수 없으면 `port-verify --target-coverage-cmd ... --target-coverage-report lcov.info` 로 내 코드 쪽 실행 범위를 잽니다.
-- 내 코드를 고쳐 줄이 밀리면 `port-map --follow` 로 옮긴 위치를 갱신합니다.
+- The approval screen shows the original response next to the expected value (or the actual difference). If the content changes after approval, it must be approved again.
+- If the original cannot be instrumented for coverage, measure your code instead with `port-verify --target-coverage-cmd ... --target-coverage-report lcov.info`.
+- When edits to your code shift lines, update the ported locations with `port-map --follow`.
 
-## 원본을 고쳐 쓰는 경우 (커스텀)
+## Quick start 3: build from a request
+
+Pick **Request based** in the app, or with the CLI:
 
 ```bash
-oss-analyzer extpoints <pid>                                  # 코어를 안 건드리고 끼울 수 있는 곳 먼저
-oss-analyzer impact <pid> pricing.calc_total --verify         # 바꾸면 영향받는 진입점·테스트·결론
-oss-analyzer custom-add <pid> --description "할인 계산 변경" --kind modify --targets pricing.calc_total
-
-# 원본 새 버전이 나오면
-oss-analyzer open <저장소> --ref v1.3.0 && oss-analyzer inventory <새 pid>
-oss-analyzer compare <기준 pid> <새 pid> --save                # 바뀐 곳 + 우리 수정과 부딪히는 곳
+oss-analyzer make-create --name order-total --request "Total from quantity. 2000 each, 10% off for 10 or more, 400 for 0 or less" --target-root <folder>
+oss-analyzer make-req <pid> <port_id> --json reqs.json          # [{"text": "total = qty x 2000"}, …] → R1, R2 …
+oss-analyzer port-capture <pid> <port_id> --cases cases.json --explore 20   # expect + req for each requirement
+oss-analyzer port-approve <pid> <port_id>                       # approve requirements and criteria before building
+oss-analyzer port-map <pid> <port_id> --json map.json           # requirement → implementation "path:line"
+oss-analyzer port-verify <pid> <port_id> --target-url http://127.0.0.1:8080 --target-cmd "<command that starts the server>"
+oss-analyzer port-finish <pid> <port_id>
 ```
 
-고친 원본을 원래 원본과 비교 검증하려면, 고친 저장소를 `--target-root` 로 두고 [빠른 시작 ②](#빠른-시작--기능-옮기기와-검증) 와 같은 방법으로 검증합니다.
+- Each case needs `req` (which requirement it checks) and `expect`; every requirement needs at least one case.
+- Automatically varied inputs are judged by **no crash and no 5xx** instead of expected values (odd input must be rejected with a 4xx).
+- If you build into an existing repository, `open` and `inventory` it first and pass `--context <its project_id>` so the build follows its structure.
 
-## 케이스 파일 형식
+## Customizing the original in place
+
+```bash
+oss-analyzer extpoints <pid>                                  # first, places to plug in without touching the core
+oss-analyzer impact <pid> pricing.calc_total --verify         # entry points, tests and conclusions affected by a change
+oss-analyzer custom-add <pid> --description "change discount calculation" --kind modify --targets pricing.calc_total
+
+# when a new upstream version is released
+oss-analyzer open <repo> --ref v1.3.0 && oss-analyzer inventory <new pid>
+oss-analyzer compare <base pid> <new pid> --save              # what changed + where it collides with your modifications
+```
+
+To verify the modified original against the unmodified one, use the modified repository as `--target-root` and follow [Quick start 2](#quick-start-2-port-a-feature-and-verify-it).
+
+## Case file format
 
 ```json
 {
   "defaults": {"headers": {"Content-Type": "application/json"}},
   "cases": [
-    {"name": "주문생성", "method": "POST", "path": "/api/v1/orders", "json": {"sku": "A1", "qty": 2},
+    {"name": "createOrder", "method": "POST", "path": "/api/v1/orders", "json": {"sku": "A1", "qty": 2},
      "match": {"id": "[0-9a-f]{32}"}, "ignore": ["createdAt"]},
-    {"name": "주문조회", "method": "GET", "path": "/api/v1/orders/{{주문생성.id}}"},
-    {"name": "수량0", "method": "POST", "path": "/api/v1/orders", "json": {"sku": "A1", "qty": 0}, "compare": "status"},
-    {"name": "할인적용", "method": "POST", "path": "/api/v1/orders", "json": {"sku": "A1", "qty": 10},
+    {"name": "getOrder", "method": "GET", "path": "/api/v1/orders/{{createOrder.id}}"},
+    {"name": "zeroQty", "method": "POST", "path": "/api/v1/orders", "json": {"sku": "A1", "qty": 0}, "compare": "status"},
+    {"name": "bulkDiscount", "method": "POST", "path": "/api/v1/orders", "json": {"sku": "A1", "qty": 10},
      "expect": {"status": 201, "equals": {"total": 18000}}},
-    {"name": "쿠폰_새기능", "new": true, "method": "POST", "path": "/api/v1/orders",
+    {"name": "coupon_new", "new": true, "method": "POST", "path": "/api/v1/orders",
      "json": {"sku": "A1", "qty": 1, "coupon": "WELCOME"}, "expect": {"equals": {"discount": 1000}}}
   ]
 }
 ```
 
-| 필드 | 뜻 |
+| Field | Meaning |
 |---|---|
-| `method`·`path`·`json`·`headers` | HTTP 케이스 |
-| `argv`·`stdin` | CLI 케이스 |
-| `call: {source, target}`·`args`·`kwargs` | 함수 단위 비교 (`경로:함수명`, 언어가 달라도 됨) |
-| `{{케이스이름.필드}}` | 앞 케이스 결과 값 사용 (이름에 공백 없이) |
-| `ignore` | 비교하지 않을 경로 (`items.*.t`) |
-| `match` | 값 대신 정규식으로 확인 (id·시간처럼 매번 다른 값) |
-| `compare: "status"` | 상태 코드만 비교 |
-| `expect` | 원본 대신 기대값과 비교 — `status`·`body`·`equals`(경로: 값, 배열은 `items.0.price`)·`match` |
-| `new: true` | 원본에 없는 동작 (`expect` 필수, 원본에서는 실행 안 함) |
-| `explore: false`·`concurrent: false` | 입력 자동 변형·동시 요청 검사에서 제외 |
+| `method`·`path`·`json`·`headers` | HTTP case |
+| `argv`·`stdin` | CLI case |
+| `call: {source, target}`·`args`·`kwargs` | function-level comparison (`path:function`, languages may differ) |
+| `{{caseName.field}}` | use a value from an earlier case's result (no spaces in the name) |
+| `ignore` | paths not compared (`items.*.t`) |
+| `match` | check with a regex instead of the value (ids, timestamps) |
+| `compare: "status"` | compare the status code only |
+| `expect` | compare with an expected value instead of the original — `status`·`body`·`equals` (path: value, arrays as `items.0.price`)·`match` |
+| `new: true` | behavior not in the original (`expect` required; not run against the original) |
+| `explore: false`·`concurrent: false` | exclude from automatic input variation / concurrency checks |
 
-## 명령 요약
+Keys outside this table are rejected when the file is saved (a misspelled key such as `args` instead of `argv` would otherwise run the case with different input). In request mode every case also needs `req`.
 
-| 분류 | 명령 |
+## Command summary
+
+| Group | Commands |
 |---|---|
-| 준비 | `doctor` `setup` `open` `list` `inventory` `classify` |
-| 분석 루프 | `next` `claim` `renew` `context` `finding` `withdraw` `mark` `unknown-add` `unknown-update` `complete` `review` `pending` |
-| 정밀 확인 | `lsp`(L1) `dataflow`(L2) `runtime-ingest` `runtime-run` `runtime-runs`(L3) |
-| 결과 | `coverage` `features` `units` `unknowns` `export` `license` |
-| 커스텀 | `extpoints` `impact` `custom-add` `custom-list` `custom-update` `compare` |
-| 포팅 | `slice` `port-create` `port-map` `port-capture` `port-verify` `port-accept` `port-status` `port-approve` `port-finish` |
+| Setup | `doctor` `setup` `open` `list` `inventory` `classify` `agent-status` |
+| App and runs | `app` `run` `runs` `data` |
+| Analysis loop | `next` `claim` `renew` `context` `finding` `withdraw` `mark` `unknown-add` `unknown-update` `complete` `review` `pending` |
+| Deeper checks | `lsp` (L1) `dataflow` (L2) `runtime-ingest` `runtime-run` `runtime-runs` (L3) |
+| Results | `coverage` `features` `units` `unknowns` `export` `license` |
+| Customizing | `extpoints` `impact` `custom-add` `custom-list` `custom-update` `compare` |
+| Request-based build | `make-create` `make-req` (then the shared port-* commands) |
+| Porting | `slice` `port-create` `port-map` `port-capture` `port-verify` `port-accept` `port-status` `port-approve` `port-finish` |
 
-각 명령의 옵션은 `oss-analyzer <명령> --help`. 모든 명령은 `{ok, data, warnings, errors}` JSON 을 출력하고,
-실패하면 `errors[0].recovery` 에 해결 방법이 나옵니다. 에이전트용 상세 절차는 스킬 문서(`oss-analyze` 스킬의 SKILL.md·CLI.md)에 있습니다.
+Options for each command: `oss-analyzer <command> --help`. Every command prints `{ok, data, warnings, errors}` JSON;
+on failure `errors[0].recovery` tells you how to fix it. The detailed agent procedure is in the skill documents (SKILL.md and CLI.md of the `oss-analyze` skill).
 
-## 설정
+## Data and storage
 
-| 환경 변수 | 기본값 | 설명 |
+Like Claude Code (`~/.claude`) and Codex (`~/.codex`), everything lives in one folder in your home directory
+(`~/.oss-analyzer`, change with `OSS_ANALYZER_HOME`), split by what it is. Nothing is sent anywhere, and no secrets are stored —
+keys and tokens are read from environment variables only and masked in output.
+
+| Folder | What | Delete? |
 |---|---|---|
-| `OSS_ANALYZER_HOME` | `~/.oss-analyzer` | 원장·clone·엔진·백업 위치 |
-| `OSS_ANALYZER_CONTAINER` | `auto` | 격리 실행 엔진 `auto`·`docker`·`wsl`·`none` |
-| `OSS_ANALYZER_WSL_DISTRO` | `oss-sandbox` | Windows 에서 쓸 WSL 배포판 |
-| `OSS_ANALYZER_LEASE_SECONDS` | `3600` | 분석 단위 임대 시간 |
-| `OSS_ANALYZER_UNIT_MAX_LINES` / `_UNIT_MAX_CHARS` | `1500` / `45000` | 분석 단위 크기 상한 |
-| `OSS_ANALYZER_CONTEXT_MAX_CHARS` | `24000` | `context` 한 페이지 크기 |
-| `OSS_ANALYZER_LSP_TIMEOUT_SECONDS` / `_LSP_IDLE_SECONDS` | `900` / `600` | 언어 서버 응답 대기·유휴 종료 |
-| `OSS_ANALYZER_RULEPACKS` | — | 추가 진입점 규칙 폴더 |
-| `OSS_ANALYZER_CBM` · `_ASTGREP` · `_JOERN` · `_JAVA_HOME` | 자동 탐색 | 엔진 실행 파일 직접 지정 |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | 스킬을 설치할 Claude Code 설정 폴더 |
+| `settings.json` | your preferences (cleanup, defaults) | yes — back to defaults |
+| `projects/<id>/` | analysis/porting ledger `ledger.db` (SQLite, versioned schema, hash chain), the pinned clone of the original, golden responses | **no** — the record of approvals and verification |
+| `runs/<run>/` | one automatic run = one conversation: `run.json` state, `events.jsonl` append-only timeline, `inbox/` questions and approval requests, `shadow.git` checkpoints of the target folder, `agent/` agent settings regenerated every round | move to the trash instead |
+| `trash/` | deleted runs, emptied automatically after 7 days | yes |
+| `app/` | app icon used by the shortcuts | no |
+| `cache/` · `cbm-cache/` | agent status, verification harness, structure-map index | yes — rebuilt |
+| `work/` | temporary copies for verification and coverage, removed after use | yes |
+| `bin/` · `engines/` · `node/` | analysis engines installed by `setup` | yes — reinstall with `setup` |
 
-## 안전 원칙
+The agent's own conversation stays where its CLI keeps it (`~/.claude/projects`, `~/.codex/sessions`) and is resumed by session id.
+In your target folder the toolkit writes only `.oss/cases.json` (acceptance cases) — commit it or ignore it as you like.
 
-- **분석 대상 코드는 실행하지 않습니다.** 언어 서버의 빌드 스크립트·매크로 실행도 끕니다. 실행이 필요한 검증(커버리지·포팅 원본)은
-  컨테이너(네트워크 차단)에서, 또는 사용자가 신뢰한다고 한 저장소만 임시 사본에서 실행합니다.
-- **비밀 파일은 읽지 않고**, 일반 파일 속 비밀값(비밀번호·키·토큰·URL 자격 증명)은 출력할 때 `****` 로 가립니다.
-  실행 환경 변수에서도 토큰·키류는 빼고 넘깁니다.
-- 분석은 **전용 clone 의 고정 커밋**에서만 합니다. 작업 중인 원본 폴더의 미커밋 변경은 반영되지 않습니다.
-- 포팅의 사람 승인은 MCP 확인 창이나 사용자의 터미널 입력으로만 받습니다.
+| | Claude Code | Codex | this toolkit |
+|---|---|---|---|
+| Conversation | `projects/<folder>/<session>.jsonl` | `sessions/YYYY/MM/DD/*.jsonl` | `runs/<run>/events.jsonl` (+ the agent's own transcript) |
+| Settings | `settings.json` | `config.toml` | `settings.json` |
+| State | file-history checkpoints | versioned SQLite | per-project SQLite ledger (versioned, hash chain) + git checkpoints per run |
+| Cleanup | old conversations deleted after 30 days by default | kept | kept by default; optional automatic cleanup of finished or hidden runs after 30/90 days; trash emptied after 7 days |
 
-## 알려진 한계
+Deleting a run never removes approvals or verification results — those stay in the project ledger.
 
-| 한계 | 대응 |
+```bash
+oss-analyzer data                        # where everything is and how big
+oss-analyzer data --trash <run>          # move a run to the trash (--restore <name>, --empty-trash)
+oss-analyzer data --prune 30 --dry-run   # finished or hidden runs untouched for 30 days
+oss-analyzer data --set-cleanup 30       # clean those up automatically at start-up (0 = off)
+```
+
+In the app: **Storage** at the bottom of the sidebar, and **Move to trash** in a run's ⋯ menu.
+
+## Configuration
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `OSS_ANALYZER_HOME` | `~/.oss-analyzer` | location of ledgers, clones, engines and backups |
+| `OSS_ANALYZER_CONTAINER` | `auto` | isolated execution engine: `auto`·`docker`·`wsl`·`none` |
+| `OSS_ANALYZER_WSL_DISTRO` | `oss-sandbox` | WSL distribution used on Windows |
+| `OSS_ANALYZER_LEASE_SECONDS` | `3600` | analysis unit lease time |
+| `OSS_ANALYZER_UNIT_MAX_LINES` / `_UNIT_MAX_CHARS` | `1500` / `45000` | analysis unit size limits |
+| `OSS_ANALYZER_CONTEXT_MAX_CHARS` | `24000` | page size of `context` |
+| `OSS_ANALYZER_LSP_TIMEOUT_SECONDS` / `_LSP_IDLE_SECONDS` | `900` / `600` | language server response timeout / idle shutdown |
+| `OSS_ANALYZER_RULEPACKS` | — | additional entry-point rule folder |
+| `OSS_ANALYZER_CBM` · `_ASTGREP` · `_JOERN` · `_JAVA_HOME` | auto-detected | explicit engine executables |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code config folder the skill is installed into |
+
+## Safety principles
+
+- **The analyzed code is never executed.** Language server build scripts and macro expansion are turned off as well. Verification that needs execution
+  (coverage, porting originals) runs in a container with the network blocked, or in a temporary copy only for repositories the user says they trust.
+- **Secret files are not read**, and secrets inside ordinary files (passwords, keys, tokens, URL credentials) are masked as `****` in output.
+  Tokens and keys are also stripped from the environment passed to executed commands.
+- Analysis runs only on **a dedicated clone at a pinned commit**. Uncommitted changes in your working folder are not included.
+- Human approval for porting is taken only in the desktop app, the MCP confirmation dialog or the user's own terminal input — never from an agent during an automatic run.
+
+## Known limitations
+
+| Limitation | Mitigation |
 |---|---|
-| 차등 검증은 돌려 본 입력만 증명 | 입력 자동 변형·커버리지로 범위를 넓히고, 남은 범위는 근거의 limitations 에 기록. 성능은 비교하지 않음 |
-| 커버리지는 "실행됐다"만 증명 | 어떤 분기·입력인지는 케이스로 따로 확인 |
-| 이름 기반 호출 관계는 후보 | 언어 서버(L1)나 실행(L3)으로 확인해야 근거 |
-| 동적 디스패치·리플렉션·매크로 생성 코드 | 자동으로 미확인 처리 |
-| 데이터 흐름 엔진 첫 실행이 느림 (1만 줄 Java 약 15분) | 캐시, `dataflow --build-only` 로 미리 생성 |
-| CLI 는 호출마다 언어 서버를 새로 띄움 | 같은 언어는 프로세스 간 줄 세움. MCP 모드는 서버를 재사용 |
-| 설정값에 따라 바뀌는 경로 | 기본값으로 펼치고 미확인으로 표시 |
-| 로컬 프로그램이라 같은 권한으로 작정하고 기록을 위조하면 막을 수 없음 | 위조 시도는 게이트 실패로 드러남. 최종 판정은 깨끗한 환경에서 다시 실행 가능 |
+| Differential verification proves only the inputs that were run | Automatic input variation and coverage widen the scope; the remaining scope is recorded in the evidence limitations. Performance is not compared |
+| Coverage proves only that code ran | Which branch or input must be checked with cases |
+| Name-based call relations are candidates | Need a language server (L1) or execution (L3) to count as evidence |
+| Dynamic dispatch, reflection, macro-generated code | Automatically recorded as unknowns |
+| The data-flow engine is slow the first time (about 15 minutes for 10k lines of Java) | Cached; build ahead with `dataflow --build-only` |
+| The CLI starts language servers per call | Queued across processes per language; MCP mode reuses servers |
+| Routes that depend on configuration values | Expanded with defaults and marked as unknowns |
+| A local program cannot stop someone with the same permissions from deliberately forging records | Forgery attempts surface as gate failures; the final verdict can be re-run in a clean environment |
 
-## 라이선스
+## License
 
-**사용 허용, 수정 금지** — [LICENSE](LICENSE) (오픈소스 라이선스가 아닙니다).
+**Use permitted, no modification** — [LICENSE](LICENSE) (this is not an open source license). The Korean text of the LICENSE governs.
 
-- 수정하지 않은 상태로 설치·사용하는 것은 누구나 가능합니다 (회사 업무·상업적 목적 포함). 툴킷으로 만든 결과물은 사용자의 것입니다.
-- 수정·2차 저작물·수정본 배포·코드 일부를 다른 소프트웨어에 넣는 것은 저작자의 서면 허락이 필요합니다.
-- 개선 제안은 이 저장소의 이슈·풀 리퀘스트로 받습니다.
+- Anyone may install and use the unmodified software (including business and commercial use). Output you create with the toolkit is yours.
+- Modifying it, creating derivative works, distributing modified versions or putting any part of the code into other software requires the author's written permission.
+- Suggestions are welcome as issues or pull requests in this repository.
 
-사용하는 라이브러리·외부 엔진은 각자의 라이선스를 따릅니다 — [THIRD_PARTY.md](THIRD_PARTY.md).
+Libraries and external engines keep their own licenses — [THIRD_PARTY.md](THIRD_PARTY.md).

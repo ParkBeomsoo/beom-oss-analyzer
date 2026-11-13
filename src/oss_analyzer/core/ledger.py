@@ -263,6 +263,12 @@ MIGRATIONS: list[str] = [
     CREATE INDEX port_log_port ON port_log (port_id, seq);
     ALTER TABLE port ADD COLUMN log_head TEXT;
     """,
+    # v10: 요청사항 기반 만들기 (core/make.py) — 원본 없이 요구사항이 항목이 되는 원장
+    """
+    ALTER TABLE port ADD COLUMN mode TEXT NOT NULL DEFAULT 'oss';
+    ALTER TABLE port ADD COLUMN request TEXT;
+    ALTER TABLE port ADD COLUMN context TEXT;
+    """,
 ]
 
 JSON_COLUMNS = {

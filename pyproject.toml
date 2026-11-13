@@ -3,9 +3,9 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "oss-analyzer"
-version = "0.2.0"
-description = "오픈소스 저장소를 단위별로 전수 분석하는 MCP 툴킷 — 근거(파일:줄)·미확인 목록·커버리지·검증 등급(L0~L3)"
+name = "beom-oss-analyzer"
+version = "0.3.0"
+description = "오픈소스 전수 분석·기능 포팅·원본 대비 검증 툴킷 (CLI · 에이전트 스킬 · MCP 서버)"
 license = "LicenseRef-beom-oss-analyzer-use-only"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
@@ -17,10 +17,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+app = ["PySide6-Essentials>=6.12", "PySide6-Addons>=6.12", "PySide6-WebEngine>=6.12"]
 
 [project.scripts]
 oss-analyzer-mcp = "oss_analyzer.main:main"
 oss-analyzer = "oss_analyzer.cli:main"
+
+[project.gui-scripts]
+beom-oss-analyzer = "oss_analyzer.app.main:main"
+oss-analyzer-app = "oss_analyzer.app.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -28,6 +33,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "oss_analyzer.rulepacks" = ["*.yml"]
 "oss_analyzer" = ["skills/*/*.md"]
+"oss_analyzer.app" = ["web/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -124,6 +124,20 @@ oss_unit_next(agent) → oss_unit_context(unit_id, agent) [next_offset 이 있�
 차등 검증 통과(마지막 capture 케이스 전부, **검증 뒤 대상 코드가 바뀌면 무효**) · 케이스 충분성(원본 또는 대상 커버리지) ·
 사람 승인(차이 허용·생략·케이스 변경·기대값, **승인 뒤 내용이 바뀌면 무효**) · 기록 무결 · 라이선스.
 
+## 4.8 요청사항 기반 만들기 (원본 없이 "이런 기능을 만들어 줘")
+
+1. 넣을 저장소가 있으면 먼저 `oss_repo_open`·`oss_inventory_build` 로 분석하고, 그 project_id 를 context 로 넘긴다
+   (기존 라우트·서비스·설정 방식에 맞춰 만들기 위해).
+2. `oss_make_create(name, request=사용자 요청 원문, target_root)` — 응답의 port_id 로 이후 포팅 도구를 그대로 쓴다.
+3. `oss_make_requirements` — 요청을 **빠짐없이** 확인 가능한 한 문장씩 나눈다 (R1, R2 …). 애매하면 사용자에게 먼저 묻는다.
+4. 요구사항마다 합격 케이스: `expect`(기대값) + `req`(확인하는 요구사항 id). 정상·경계·오류 입력을 포함한다.
+   **기대값은 사용자 요청에서 정하고, 구현 출력을 베껴 쓰지 않는다.** `oss_port_capture(cases_file, explore_n=…)` —
+   원본이 없으므로 아무것도 실행하지 않고 기준만 저장하며, 입력 변형 케이스는 "죽지 않음·5xx 아님" 으로 판정된다.
+5. **구현 전에** 요구사항 목록과 기대값을 사용자에게 보여 주고 승인받는다 (`oss_port_approve`). 이게 계약이다.
+6. 구현 → `oss_port_map`(요구사항 → 구현 위치 '경로:줄', 못 하는 것은 omitted + 사유 → 승인)
+   → `oss_port_verify`(+ `target_coverage_*` 로 구현 코드 실행 확인) → 실패를 고쳐 다시 verify → `oss_port_finish`.
+7. 요청이 바뀌면 `oss_make_requirements` 와 케이스를 고치고 다시 capture·승인 — 기준을 몰래 낮추지 않는다.
+
 ## 5. 마무리
 
 1. `oss_report_coverage` — `gates` 중 실패 항목을 사용자에게 그대로 보고 (실패를 숨기지 않는다).

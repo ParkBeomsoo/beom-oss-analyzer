@@ -275,9 +275,9 @@ def run(conn, proj: dict, settings, command: str, *, report: str, trusted: bool 
     Docker 가 있으면 컨테이너(기본 네트워크 차단), 없으면 trusted=True 일 때만 로컬.
     """
     repo = Path(proj["repo_dir"])
-    work_root = settings.home / "runs" / proj["id"]
+    work_root = settings.home / "work"  # 임시 사본 — 실행 기록(runs/)과 섞지 않는다
     work_root.mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix="run-", dir=work_root))
+    work = Path(tempfile.mkdtemp(prefix=f"cov-{proj['id']}-", dir=work_root))
     copy = work / "src"
     # 고정 커밋 내용만 복사 (.git 제외 → 실행 코드가 원장·clone 을 건드릴 수 없음)
     shutil.copytree(repo, copy, ignore=shutil.ignore_patterns(".git"))

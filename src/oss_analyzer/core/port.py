@@ -48,6 +48,7 @@ from pathlib import Path, PurePosixPath
 from oss_analyzer.common.response import ToolError
 from oss_analyzer.config import Settings
 from oss_analyzer.core import container, evidence, ledger, runtime
+from oss_analyzer.core import make as make_mod
 from oss_analyzer.core import port_guard as guard
 from oss_analyzer.core import project as project_mod
 from oss_analyzer.core.customize import _enclosing, _symbols, feature_symbol, fingerprint, resolve_targets
@@ -497,6 +498,7 @@ GATE_ADEQUACY = "케이스가 슬라이스 함수를 모두 실행 (원본 커�
 GATE_HUMAN = "사람 확인 항목 모두 승인됨 (차이 허용·생략·케이스 변경·기대값)"
 GATE_INTEGRITY = "기록 무결 (툴킷 밖에서 원장·골든을 고치지 않음)"
 GATE_LICENSE = "라이선스 확인 필요 없음"
+GATE_REQ_CASES = "요구사항마다 합격 케이스가 있음 (expect + req)"
 
 
 def _diff_state(last: dict | None, capture: dict | None, fp_now: str) -> dict:
@@ -560,6 +562,37 @@ def _next_step(gates: dict, *, counts, capture, diff, human, adequacy, finished)
     return "완료 — port-finish 판정 유효"
 
 
+def _next_step_request(gates: dict, *, req_state, capture, diff, human, adequacy, finished) -> str:
+    """요청사항 모드 순서: 요구사항 → 합격 기준 → 사람 승인(구현 전에 목표 고정) → 구현·매핑 → 검증 → 완료."""
+    if not gates[GATE_INTEGRITY]:
+        return "기록이 툴킷 밖에서 바뀜 — 사용자에게 알리고, 바뀐 단계를 툴킷으로 다시 실행"
+    if not req_state["total"]:
+        return "make-req 로 요구사항 목록 작성 (사용자 요청을 확인 가능한 문장으로 나눔)"
+    if capture is None or not gates[GATE_REQ_CASES]:
+        missing = ", ".join(req_state["uncovered"]) if capture is not None else "전체"
+        return (f"요구사항마다 합격 케이스(expect + req) 작성 후 port-capture — 케이스 없는 요구사항: {missing}. "
+                "기대값은 사용자 요청에서 정하고 대상 코드 출력을 베끼지 않는다")
+    pending = [h for h in human if not h["approved"]]
+    if pending and any(h["kind"] in ("requirements", "expectation", "case_change") for h in pending):
+        return (f"사용자 승인 대기 {len(pending)}건 — 구현 전에 요구사항·합격 기준을 사용자에게 보여 주고 승인받기 "
+                "(MCP oss_port_approve 확인 창, 앱의 승인 카드, 또는 사용자가 터미널에서 port-approve). AI 가 대신 승인할 수 없음")
+    if not gates[GATE_MAPPED]:
+        left = req_state["total"] - req_state["implemented"]
+        return f"구현 후 port-map 으로 요구사항 {left}개의 구현 위치(경로:줄) 기록"
+    if not gates[GATE_TARGETS]:
+        return "port-map --follow (이동한 구현 위치) 또는 바뀐 위치 다시 매핑"
+    if not gates[GATE_DIFF]:
+        return f"port-verify — {diff['why']}"
+    if not gates[GATE_ADEQUACY]:
+        return f"port-verify --target-coverage-cmd/--target-coverage-report 로 구현 코드 실행 확인 — {adequacy['why']}"
+    if not gates[GATE_HUMAN]:
+        n = sum(1 for h in human if not h["approved"])
+        return f"사용자 승인 대기 {n}건 — 사용자에게 내용을 설명하고 승인 요청. AI 가 대신 승인할 수 없음"
+    if not finished or not finished.get("valid"):
+        return "port-finish 로 완료 판정 받기 (완료 보고는 port-finish 결과로만)"
+    return "완료 — port-finish 판정 유효"
+
+
 def status_(conn, port_id: str, brief: bool = False) -> dict:
     port = _port(conn, port_id)
     rows = ledger.rows_to_dicts(conn.execute("SELECT * FROM port_map WHERE port_id = ? ORDER BY kind, label", (port_id,)).fetchall())
@@ -600,6 +633,15 @@ def status_(conn, port_id: str, brief: bool = False) -> dict:
         GATE_INTEGRITY: integ["ok"],
         GATE_LICENSE: not port["slice"].get("license_warning"),
     }
+    request_mode = make_mod.is_request(port)
+    req_state = None
+    if request_mode:
+        reqs = make_mod.requirements(conn, port_id)
+        cover = (capture_ or {}).get("detail", {}).get("req_cover") or {}
+        uncovered = [r["id"] for r in reqs if not cover.get(r["id"]) and r["status"] != "omitted"]
+        req_state = {"total": len(reqs), "uncovered": uncovered,
+                     "implemented": sum(1 for r in reqs if r["status"] == "ported")}
+        gates[GATE_REQ_CASES] = bool(reqs) and capture_ is not None and not uncovered
     complete = all(gates.values())
     fin = _last_check(conn, port_id, "finish")
     finished = None
@@ -607,8 +649,12 @@ def status_(conn, port_id: str, brief: bool = False) -> dict:
         finished = {"id": fin["id"], "at": fin["created_at"], "valid": complete and fin["detail"].get("target_fp") == fp_now}
     out = {"port_id": port_id, "name": port["name"], "target_language": port["target_language"], "counts": dict(counts),
            "gates": gates, "complete": complete, "finished": finished,
-           "next_step": _next_step(gates, counts=counts, capture=capture_, diff=diff, human=human,
-                                   adequacy=adequacy, finished=finished),
+           "next_step": (_next_step_request(gates, req_state=req_state, capture=capture_, diff=diff, human=human,
+                                            adequacy=adequacy, finished=finished) if request_mode else
+                         _next_step(gates, counts=counts, capture=capture_, diff=diff, human=human,
+                                    adequacy=adequacy, finished=finished)),
+           "mode": port.get("mode") or "oss",
+           **({"requirements": req_state} if request_mode else {}),
            "broken_targets": broken,
            "differential": diff,
            "adequacy": adequacy,
@@ -747,7 +793,7 @@ process.stdin.on("end", async () => {
 
 
 def _harness_dir(settings: Settings) -> Path:
-    d = settings.home / "harness"
+    d = settings.home / "cache" / "harness"  # 매번 다시 쓰는 파일 — 지워도 된다
     d.mkdir(parents=True, exist_ok=True)
     for name, text in (("harness.py", HARNESS_PY), ("harness.js", HARNESS_JS)):
         f = d / name
@@ -923,6 +969,14 @@ def _get_any(body, path: str):
 
 
 EXPECT_KEYS = {"status", "body", "equals", "match"}
+# 케이스 파일에서 읽는 키 — 모르는 키는 거절한다 (오타·다른 형식의 키가 조용히 무시되면 엉뚱한 입력으로 검증된다)
+CASE_KEYS = {"name", "argv", "stdin", "method", "path", "json", "body", "headers", "call", "args", "kwargs", "runtime",
+             "expect", "invariant", "req", "new", "compare", "ignore", "match", "explore", "concurrent", "generated",
+             "from", "note", "description"}
+CASE_INPUT_KEYS = ("argv", "stdin", "method", "path", "json", "body", "headers", "call", "args", "kwargs")
+CASE_KEY_HINTS = {"id": "케이스 이름은 name", "kind": "종류는 키로 정해짐 (argv/stdin=CLI, path/method=HTTP, call=함수)",
+                  "cmd": "실행 명령은 케이스가 아니라 source_cli/target_cli 로", "input": "CLI 표준 입력은 stdin",
+                  "expected": "기대값은 expect", "requirement": "요구사항 연결은 req", "reqs": "요구사항 연결은 req"}
 
 
 def check_expect(dst: dict, case: dict) -> list[str]:
@@ -953,10 +1007,22 @@ def check_expect(dst: dict, case: dict) -> list[str]:
     return diffs
 
 
+def check_invariant(dst: dict, case: dict) -> list[str]:
+    """원본도 기대값도 없는 입력(요청사항 모드의 입력 변형)에 대한 최소 조건 — 죽지 않고, HTTP 면 5xx 가 아니다."""
+    if dst.get("crashed"):
+        return ["대상이 이 입력에서 종료됨"]
+    status = dst.get("status")
+    if ("path" in case or "method" in case) and isinstance(status, int) and status >= 500:
+        return [f"서버 오류 status {status} (이상한 입력도 4xx 로 거절해야 함)"]
+    return []
+
+
 def _case_diffs(s: dict, d: dict, c: dict) -> list[str]:
-    """한 케이스 판정 — 기대값 케이스는 기대값과, 나머지는 원본과."""
+    """한 케이스 판정 — 기대값 케이스는 기대값과, 불변 조건 케이스는 조건으로, 나머지는 원본과."""
     if d.get("error"):
         return [f"대상 오류: {d['error']}"]
+    if c.get("invariant"):
+        return check_invariant(d, c)
     if c.get("expect"):
         return check_expect(d, c)
     if s.get("error"):
@@ -1092,6 +1158,37 @@ def _direct_argv(cmd: str) -> tuple[str | list[str], bool]:
     return [exe, *parts[1:]], False
 
 
+def case_commands(cases: list[dict]) -> dict[str, str]:
+    """케이스 안에 들어 있는 실행 명령 — 함수 호출용 call.<쪽>.cmd 와 실행기 runtime.<쪽>. 검증 도구가 셸로 돌린다."""
+    out: dict[str, str] = {}
+    for i, c in enumerate(cases):
+        name = c.get("name") or f"#{i + 1}"
+        for side, spec in (c.get("call") or {}).items():
+            if isinstance(spec, dict) and spec.get("cmd"):
+                out[f"case {name} call.{side}.cmd"] = str(spec["cmd"])
+        for side, rt in (c.get("runtime") or {}).items():
+            if rt:
+                out[f"case {name} runtime.{side}"] = str(rt)
+    return out
+
+
+def commands_in_cases(settings: Settings, proj_id: str, port_id: str, cases_file: str | None) -> dict[str, str]:
+    """이번 캡처·검증에서 실행될 케이스 명령 — 넘긴 케이스 파일과 저장된 골든 모두."""
+    cases: list[dict] = []
+    if cases_file and Path(cases_file).is_file():
+        try:
+            cases += _load_cases(Path(cases_file))[1]
+        except (ToolError, ValueError):
+            pass
+    golden = project_mod.workspace(settings, proj_id) / "ports" / port_id / "golden.json"
+    if golden.is_file():
+        try:
+            cases += json.loads(golden.read_text(encoding="utf-8")).get("cases") or []
+        except (OSError, ValueError):
+            pass
+    return case_commands(cases)
+
+
 def _load_cases(path: Path) -> tuple[dict, list[dict]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     defaults = data.get("defaults", {}) if isinstance(data, dict) else {}
@@ -1101,7 +1198,16 @@ def _load_cases(path: Path) -> tuple[dict, list[dict]]:
     out = [{**defaults, **c} for c in cases]
     for i, c in enumerate(out):
         name = c.get("name") or f"#{i + 1}"
-        if c.get("new") and not c.get("expect"):
+        if not isinstance(c, dict):
+            raise ToolError("invalid_request", f"케이스 {name}: 객체여야 함")
+        unknown = set(c) - CASE_KEYS
+        if unknown:
+            hints = [CASE_KEY_HINTS[k] for k in sorted(unknown) if k in CASE_KEY_HINTS]
+            raise ToolError("invalid_request", f"케이스 {name}: 모르는 키 {sorted(unknown)} — 무시하면 다른 입력으로 실행된다"
+                            + (f" ({'; '.join(hints)})" if hints else ""), recovery=f"쓸 수 있는 키: {sorted(CASE_KEYS)}")
+        if ("args" in c or "kwargs" in c) and "call" not in c:
+            raise ToolError("invalid_request", f"케이스 {name}: args·kwargs 는 함수 호출(call) 케이스용 — CLI 인자는 argv 로 적는다")
+        if c.get("new") and not c.get("expect") and not c.get("invariant"):
             raise ToolError("invalid_request", f"케이스 {name}: new(원본에 없는 동작)는 expect(기대값)가 필요함")
         if "expect" in c and (not isinstance(c["expect"], dict) or not EXPECT_KEYS & set(c["expect"])):
             raise ToolError("invalid_request", f"케이스 {name}: expect 는 {sorted(EXPECT_KEYS)} 중 하나 이상을 가진 객체")
@@ -1272,8 +1378,8 @@ def _source_side(settings: Settings, proj: dict, cases: list[dict], *, cmd: str 
     elif not trusted:
         raise ToolError("capability_unavailable", "원본 코드를 로컬에서 실행하려면 trusted=True 가 필요함",
                         recovery="신뢰하지 않는 저장소면 source_image 로 Docker 안에서 실행, 또는 원본을 직접 띄우고 source_url 만 넘김")
-    (settings.home / "runs").mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix="port-", dir=settings.home / "runs"))
+    (settings.home / "work").mkdir(parents=True, exist_ok=True)  # 임시 사본 — 실행 기록(runs/)과 섞지 않는다
+    work = Path(tempfile.mkdtemp(prefix="port-", dir=settings.home / "work"))
     copy = work / "src"
     shutil.copytree(proj["repo_dir"], copy, ignore=shutil.ignore_patterns(".git"))
     return work, copy
@@ -1396,7 +1502,13 @@ def capture(conn, proj: dict, settings: Settings, port_id: str, cases_file: str,
     explore_n: 입력 변형 케이스를 추가 생성. coverage_report: 원본 커버리지로 케이스 충분성 확인."""
     port = _port(conn, port_id)
     defaults, cases = _load_cases(Path(cases_file))
-    generated = explore(cases, explore_n, seed)
+    request_mode = make_mod.is_request(port)
+    if request_mode:
+        cases = make_mod.prepare_cases(cases)
+        base = [{k: v for k, v in c.items() if k != "expect"} for c in cases]
+        generated = make_mod.invariant_variants(cases, explore(base, explore_n, seed))
+    else:
+        generated = explore(cases, explore_n, seed)
     cases = cases + generated
     run = _run_source(conn, proj, settings, port, cases, url=source_url, cmd=source_cmd, cli=source_cli, trusted=trusted,
                       image=source_image, timeout=timeout, coverage_cmd=coverage_cmd, coverage_report=coverage_report)
@@ -1417,12 +1529,15 @@ def capture(conn, proj: dict, settings: Settings, port_id: str, cases_file: str,
     change = guard.case_change(baseline, rules)
     adq_id = run["adequacy"].get("check_id") if isinstance(run["adequacy"], dict) else None
     cid = "cap_" + uuid.uuid4().hex[:12]
-    expectations = {c.get("name") or f"#{i}": {"expect": c["expect"], "new": bool(c.get("new")),
+    expectations = {c.get("name") or f"#{i}": {"expect": c["expect"], "new": bool(c.get("new")), "order": i,
+                                                 "input": {k: c[k] for k in CASE_INPUT_KEYS if k in c},
                                                  "source": None if r.get("new") else
                                                  {"status": r.get("status"), "body": json.dumps(r.get("body"), ensure_ascii=False)[:300]}}
                     for i, (c, r) in enumerate(zip(cases, results)) if c.get("expect")}
     detail = {"golden": str(golden), "golden_sha": hashlib.sha256(golden.read_bytes()).hexdigest(), "rules": rules,
               "baseline": baseline, "change": change, "adequacy_check": adq_id, "expectations": expectations}
+    if request_mode:
+        detail["req_cover"] = make_mod.coverage_of(cases, [r["id"] for r in make_mod.requirements(conn, port_id)])
     with ledger.tx(conn):
         conn.execute("INSERT INTO port_check (id, port_id, kind, cases, passed, failed, detail, evidence_id, created_at) "
                      "VALUES (?, ?, 'capture', ?, ?, ?, ?, NULL, ?)",
@@ -1543,6 +1658,8 @@ def verify(conn, proj: dict, settings: Settings, port_id: str, *, target_url: st
             diffs = []
         excused = [a["diffs_full"] for a in accepted if a["name"] == s["name"]] if why and not diffs else []
         rows.append({"name": s["name"], "ok": not diffs, "diffs": diffs, **({"generated": True} if c.get("generated") else {}),
+                     "actual": {"status": d.get("status"), "body": json.dumps(d.get("body"), ensure_ascii=False)[:300] if d.get("body") is not None else None,
+                                **({"error": str(d["error"])[:300]} if d.get("error") else {})},
                      **({"expected": "new" if c.get("new") else "changed"} if c.get("expect") else {}),
                      **({"accepted": why, "accepted_diffs": excused[0]} if why and not diffs else {})})
         passed += not diffs
@@ -1620,7 +1737,8 @@ def _target_adequacy(conn, port: dict, report: Path, fp: str) -> dict:
         return next((v for k, v in norm.items() if k == rel_l or k == full or k.endswith("/" + rel_l)), None)
 
     rows = []
-    for r in conn.execute("SELECT * FROM port_map WHERE port_id = ? AND status = 'ported' AND kind = 'symbol' ORDER BY item_id",
+    for r in conn.execute("SELECT * FROM port_map WHERE port_id = ? AND status = 'ported' AND kind IN ('symbol', 'requirement') "
+                          "ORDER BY item_id",
                           (port["id"],)).fetchall():
         m = re.fullmatch(r"(.+?):(\d+)", r["target_ref"] or "")
         if not m:

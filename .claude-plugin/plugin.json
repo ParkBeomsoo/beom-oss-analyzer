@@ -1,6 +1,6 @@
 {
   "name": "beom-oss-analyzer",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "오픈소스를 근거(파일:줄)와 함께 전수 분석하고, 필요한 기능을 다른 저장소·언어로 옮겨 원본과 같은지 검증하는 툴킷 (스킬 + MCP)",
   "author": {
     "name": "ParkBeomsoo",
@@ -13,7 +13,7 @@
   "mcpServers": {
     "oss-analyzer": {
       "command": "python",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/plugin/launch_mcp.py", "0.2.0"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/plugin/launch_mcp.py", "0.3.0"]
     }
   }
 }

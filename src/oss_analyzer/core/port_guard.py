@@ -27,7 +27,7 @@ SKIP_DIRS = {".git", "node_modules", "target", "__pycache__", ".venv", "venv", "
              ".pytest_cache", ".mypy_cache", ".next", ".gradle"}
 MAX_FILES = 20000
 MAX_FILE_BYTES = 4 * 1024 * 1024
-HUMAN_CHANNELS = {"mcp-elicitation", "cli-tty"}
+HUMAN_CHANNELS = {"mcp-elicitation", "cli-tty", "desktop-app"}
 
 
 def _now() -> str:
@@ -206,6 +206,14 @@ def reviews(conn, port_id: str, last_diff: dict | None, last_capture: dict | Non
     approved = _approved(_logs(conn, port_id))
     rows = (last_diff or {}).get("detail", {}).get("rows", []) if last_diff else []
     items = []
+    reqs = [dict(r) for r in conn.execute("SELECT item_id, label FROM port_map WHERE port_id = ? AND kind = 'requirement'",
+                                          (port_id,)).fetchall()]
+    if reqs:
+        reqs.sort(key=lambda r: int(r["item_id"][1:]))
+        listing = [(r["item_id"], r["label"]) for r in reqs]
+        items.append({"item_id": "requirements", "kind": "requirements", "fingerprint": _sha(listing),
+                      "summary": f"요구사항 {len(reqs)}개 — 이 목록대로 만든다",
+                      "detail": [{"case": rid, "diff": text[:240]} for rid, text in listing]})
     for r in conn.execute("SELECT * FROM port_map WHERE port_id = ? AND kind = 'divergence' ORDER BY label",
                           (port_id,)).fetchall():
         cases = divergence_cases(rows, r["label"])
@@ -256,7 +264,7 @@ def render(items: list[dict]) -> str:
     lines = []
     for i, it in enumerate(items, 1):
         lines.append(f"{i}. [{it['kind']}] {it['summary']}")
-        if it["kind"] in ("divergence", "expectation"):
+        if it["kind"] in ("divergence", "expectation", "requirements"):
             lines += [f"     - {d['case']}: {d['diff']}" for d in it["detail"]]
         elif it["kind"] == "case_change":
             d = it["detail"]

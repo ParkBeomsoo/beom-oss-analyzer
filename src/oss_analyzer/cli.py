@@ -194,6 +194,44 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--case", nargs="+", required=True)
     p.add_argument("--reason", required=True)
     p.add_argument("--agent", default="cli")
+    p = sub.add_parser("data", help="저장 위치·크기, 휴지통·정리 (홈 폴더 하나에 성격별로 나눠 둔다)")
+    p.add_argument("--trash", metavar="RUN_ID", help="실행을 휴지통으로 (원장은 남음)")
+    p.add_argument("--restore", metavar="NAME", help="휴지통에서 되살리기 (휴지통 목록의 name)")
+    p.add_argument("--empty-trash", action="store_true", help="휴지통 비우기")
+    p.add_argument("--prune", type=int, metavar="DAYS", help="끝났거나 숨긴 실행 중 DAYS 일 동안 그대로인 것을 휴지통으로")
+    p.add_argument("--dry-run", action="store_true", help="--prune 대상만 보기")
+    p.add_argument("--set-cleanup", type=int, metavar="DAYS", help="앱·CLI 시작 때 자동 정리 (0 = 끔)")
+    p.add_argument("--no-sizes", action="store_true", help="크기 계산 생략 (빠름)")
+    p = sub.add_parser("app", help="데스크톱 앱 열기 (pip install 'beom-oss-analyzer[app]')")
+    p.add_argument("--shortcut", nargs="?", const="start,desktop", metavar="start,desktop",
+                   help="앱을 열지 않고 바로가기만 만든다 — 시작 메뉴(검색에 나옴)·바탕화면")
+    p.add_argument("--remove-shortcut", action="store_true", help="만든 바로가기를 지운다")
+    p = sub.add_parser("run", help="자동 실행 — Claude Code 로 단계를 끝까지 진행 (승인·질문은 앱에서)")
+    p.add_argument("--mode", choices=["request", "oss"], help="새 실행일 때 필수")
+    p.add_argument("--target-root", help="새 실행일 때 필수")
+    p.add_argument("--name")
+    p.add_argument("--request", default="", help="요청사항 (request 모드) 또는 추가 요청 (oss 모드)")
+    p.add_argument("--source", help="원본 저장소 (oss 모드)")
+    p.add_argument("--feature", help="옮길 기능 (oss 모드)")
+    p.add_argument("--max-rounds", type=int, default=8)
+    p.add_argument("--model")
+    p.add_argument("--auth", choices=["subscription", "api_key"], default="subscription")
+    p.add_argument("--agent", choices=["claude", "codex", "gemini"], default="claude")
+    p.add_argument("--create-only", action="store_true", help="실행 준비만 (앱에서 시작)")
+    p.add_argument("--resume", metavar="RUN_ID", help="멈춘 실행 이어서")
+    sub.add_parser("runs", help="실행 목록")
+    sub.add_parser("agent-status", help="Claude Code 설치·로그인 확인")
+    p = sub.add_parser("make-create", help="요청사항 기반 만들기 시작 (원본 없이 요구사항이 항목이 되는 원장)")
+    p.add_argument("--name", required=True)
+    p.add_argument("--request", required=True, help="사용자 요청 원문")
+    p.add_argument("--target-root", required=True, help="만들 곳 (내 저장소 또는 새 폴더)")
+    p.add_argument("--context", help="함께 볼 분석 프로젝트 id (넣을 저장소·참고 저장소를 open·inventory 한 것)")
+    p.add_argument("--agent", default="cli")
+    p = sub.add_parser("make-req", help="요구사항 목록 정하기 (--json: [{id?: R1, text}]) — 사용자 승인 대상")
+    p.add_argument("project_id")
+    p.add_argument("port_id")
+    p.add_argument("--json", help="요구사항 파일 (없으면 지금 목록 보기)")
+    p.add_argument("--agent", default="cli")
     p = sub.add_parser("port-status", help="포팅 진행·게이트·다음 할 일")
     p.add_argument("project_id")
     p.add_argument("port_id", nargs="?")
@@ -256,6 +294,64 @@ def _run(args: argparse.Namespace) -> Any:
         if args.remove:
             return setup.remove(settings, args.remove, args.scope, pdir)
         return setup.plan(settings, args.languages, args.scope, pdir)
+    if args.cmd == "data":
+        from oss_analyzer.core import storage
+
+        storage.migrate(settings)
+        if args.trash:
+            return storage.trash_run(settings, args.trash)
+        if args.restore:
+            return storage.restore_run(settings, args.restore)
+        if args.empty_trash:
+            return storage.empty_trash(settings)
+        if args.prune is not None:
+            return storage.prune_runs(settings, args.prune, dry_run=args.dry_run)
+        if args.set_cleanup is not None:
+            return storage.save_prefs(settings, {"cleanup_days": args.set_cleanup or None})
+        return storage.report(settings, sizes=not args.no_sizes)
+    if args.cmd == "app":
+        from oss_analyzer.core import shortcut
+
+        if args.remove_shortcut:
+            return shortcut.remove()
+        try:
+            from oss_analyzer.app import main as app_main
+        except ImportError as e:
+            raise ToolError("not_found", f"데스크톱 앱 구성요소가 없음 ({e.name})",
+                            recovery="pip install 'beom-oss-analyzer[app]'") from None
+        if args.shortcut:
+            where = tuple(w.strip() for w in args.shortcut.split(",") if w.strip() in shortcut.LOCATIONS) or shortcut.LOCATIONS
+            return shortcut.create(settings, where, icon=app_main.write_icon_files(settings.home))
+        return {"exit_code": app_main.main([])}
+    if args.cmd == "agent-status":
+        from oss_analyzer.core import runner
+
+        return runner.agent_status()
+    if args.cmd == "runs":
+        from oss_analyzer.core import inbox
+
+        return {"runs": [{k: r.get(k) for k in ("id", "name", "mode", "status", "round", "max_rounds", "project_id", "port_id")}
+                         for r in inbox.list_runs(settings)]}
+    if args.cmd == "run":
+        from oss_analyzer.core import runner
+
+        if args.resume:
+            run_id = args.resume
+        elif not (args.mode and args.target_root):
+            raise ToolError("invalid_request", "새 실행에는 --mode 와 --target-root 가 필요함 (이어서 할 때는 --resume RUN_ID)")
+        else:
+            run_id = runner.create(settings, mode=args.mode, target_root=args.target_root, request=args.request,
+                                   name=args.name, source=args.source, feature=args.feature, max_rounds=args.max_rounds,
+                                   model=args.model, auth=args.auth, agent=args.agent)["id"]
+            if args.create_only:
+                return {"run_id": run_id}
+        sys.stderr.write(f"실행 {run_id} — 승인·질문은 데스크톱 앱(beom-oss-analyzer)에서 답한다\n")
+        return runner.Runner(settings, run_id).run()
+    if args.cmd == "make-create":
+        from oss_analyzer.core import make
+
+        return make.create(settings, name=args.name, request=args.request, target_root=args.target_root,
+                           context=args.context, author=args.agent)
     if args.cmd == "compare":
         out = customize.compare_versions(settings, args.base_project_id, args.head_project_id, args.limit)
         if args.save:
@@ -379,6 +475,12 @@ def _run(args: argparse.Namespace) -> Any:
         return port.map_items(conn, args.port_id, _as_list(_load_json(args.json)), args.agent)
     if cmd == "port-accept":
         return port.accept(conn, args.port_id, args.case, args.reason, args.agent)
+    if cmd == "make-req":
+        from oss_analyzer.core import make
+
+        if not args.json:
+            return {"requirements": make.requirements(conn, args.port_id)}
+        return make.set_requirements(conn, args.port_id, _as_list(_load_json(args.json)), args.agent)
     if cmd == "port-status":
         return port.status_(conn, args.port_id) if args.port_id else port.list_(conn)
     if cmd == "port-approve":

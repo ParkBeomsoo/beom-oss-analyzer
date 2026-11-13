@@ -5,7 +5,7 @@ from pathlib import Path
 
 from oss_analyzer.common.response import enveloped
 from oss_analyzer.core import license as license_mod
-from oss_analyzer.core import project, runtime
+from oss_analyzer.core import inbox, project, runtime
 from oss_analyzer.server import mcp, settings
 
 
@@ -33,6 +33,7 @@ def oss_runtime_run(project_id: str, command: str, report: str, trusted: bool = 
     Args:
         report: 명령이 만드는 리포트 경로 (사본 루트 기준, 예: coverage.json)
     """
+    inbox.gate_commands(settings, {"command": command})
     conn, proj = project.load(settings, project_id)
     return runtime.run(conn, proj, settings, command, report=report, trusted=trusted, image=image,
                        timeout=timeout, network=network)

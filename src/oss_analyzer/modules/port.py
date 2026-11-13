@@ -1,11 +1,13 @@
 """포팅 도구 — 분석한 기능을 내 저장소로 옮기거나 다른 언어로 다시 만들고, 원본과 같은 동작인지 검증."""
 from __future__ import annotations
 
+import os
+
 from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
 from oss_analyzer.common.response import Envelope, ToolError, enveloped
-from oss_analyzer.core import port, port_guard, project
+from oss_analyzer.core import inbox, port, port_guard, project
 from oss_analyzer.server import mcp, settings
 
 
@@ -55,6 +57,31 @@ def oss_port_accept(project_id: str, port_id: str, cases: list[str], reason: str
 
 
 @mcp.tool()
+@enveloped("make.create")
+def oss_make_create(name: str, request: str, target_root: str, context: str | None = None, author: str = "agent") -> dict:
+    """요청사항 기반 만들기 시작 — 원본 없이 "이런 기능을 만들어 줘" 에서 출발하는 원장을 만든다.
+    target_root: 만들 곳. context: 넣을 저장소·참고 저장소를 oss_repo_open·inventory 한 프로젝트 id (기존 구조에 맞추기).
+    이후: oss_make_requirements → 요구사항마다 합격 케이스(expect + req) → oss_port_capture → 사용자 승인 → 구현 →
+    oss_port_map(요구사항 → 구현 위치) → oss_port_verify → oss_port_finish. 각 응답의 next_step 을 따른다."""
+    from oss_analyzer.core import make
+
+    return make.create(settings, name=name, request=request, target_root=target_root, context=context, author=author)
+
+
+@mcp.tool()
+@enveloped("make.requirements")
+def oss_make_requirements(project_id: str, port_id: str, requirements: list[dict] | None = None, actor: str = "agent") -> dict:
+    """요구사항 목록 보기(requirements 생략) 또는 통째로 정하기: [{id?: "R1", text: "확인 가능한 한 문장"}].
+    사용자 요청을 빠짐없이 나누고, 각 문장은 케이스로 확인할 수 있게 쓴다. 목록은 사용자 승인 대상(바뀌면 재승인)."""
+    from oss_analyzer.core import make
+
+    conn, _ = project.load(settings, project_id)
+    if requirements is None:
+        return {"requirements": make.requirements(conn, port_id)}
+    return make.set_requirements(conn, port_id, requirements, actor)
+
+
+@mcp.tool()
 @enveloped("port.status")
 def oss_port_status(project_id: str, port_id: str | None = None) -> dict:
     """포팅 진행·게이트·next_step(다음 할 일). 게이트: 매핑 · 대상 위치 · 차등 검증(지금 코드 기준) · 케이스 충분성 ·
@@ -72,6 +99,8 @@ def oss_port_capture(project_id: str, port_id: str, cases_file: str, source_url:
     """원본에 케이스(HTTP·CLI·함수 호출)를 돌려 골든 응답을 저장.
     원본 실행: source_image(Docker 격리) 또는 trusted=True(로컬 임시 사본). explore_n: 입력 변형 케이스 추가 생성.
     coverage_report(+coverage_cmd): 원본 커버리지로 케이스가 슬라이스 함수를 모두 거쳤는지 확인(게이트)."""
+    inbox.gate_commands(settings, {"source_cmd": source_cmd, "source_cli": source_cli, "coverage_cmd": coverage_cmd,
+                                   **port.commands_in_cases(settings, project_id, port_id, cases_file)})
     conn, proj = project.load(settings, project_id)
     return port.capture(conn, proj, settings, port_id, cases_file, source_url=source_url, source_cmd=source_cmd,
                         source_cli=source_cli, trusted=trusted, source_image=source_image, explore_n=explore_n,
@@ -87,6 +116,9 @@ def oss_port_verify(project_id: str, port_id: str, target_url: str | None = None
                     target_coverage_report: str | None = None) -> dict:
     """대상(내 코드, 어떤 언어든)을 원본과 차등 비교. 기본은 골든 대비, source_* 를 주면 실시간.
     concurrency>1: 케이스마다 대상에 동시 요청. 전부 통과하면 원본 처리 함수에 L3 근거(differential)."""
+    inbox.gate_commands(settings, {"target_cmd": target_cmd, "target_cli": target_cli, "source_cmd": source_cmd,
+                                   "source_cli": source_cli, "target_coverage_cmd": target_coverage_cmd,
+                                   **port.commands_in_cases(settings, project_id, port_id, cases_file)})
     conn, proj = project.load(settings, project_id)
     return port.verify(conn, proj, settings, port_id, target_url=target_url, target_cmd=target_cmd, target_cli=target_cli,
                        cases_file=cases_file, source_url=source_url, source_cmd=source_cmd, source_cli=source_cli,
@@ -109,6 +141,8 @@ async def oss_port_approve(project_id: str, port_id: str, ctx: Context) -> dict:
     응답은 사용자가 직접 한다 — 에이전트가 대신 답할 수 없다. 클라이언트가 확인 창을 지원하지 않으면
     사용자에게 터미널에서 `oss-analyzer port-approve <project> <port>` 를 직접 실행해 달라고 요청한다."""
     env = Envelope("port.approve")
+    if os.environ.get("OSS_ANALYZER_RUN"):
+        return env.fail("denied", "자동 실행 중에는 에이전트가 승인을 요청하지 않는다 — 사용자가 앱에서 승인한다")
     try:
         conn, _ = project.load(settings, project_id)
         items = port.pending_reviews(conn, port_id)

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' qrc:; script-src 'self' qrc:; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>beom-oss-analyzer</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="side">
+    <div class="brand"><div class="mark"><i></i></div><b><span class="by">beom</span>oss-analyzer</b><span class="ver" id="ver"></span></div>
+    <button class="newbtn" id="newbtn"><span class="plus">+</span>새 프로젝트<kbd>Ctrl N</kbd></button>
+    <nav id="runs" class="runs"></nav>
+    <div class="agents" id="agents"></div>
+    <button class="databtn" id="databtn">저장 공간</button>
+  </aside>
+  <main class="main" id="main"></main>
+  <aside class="right" id="right"></aside>
+</div>
+<div class="toast" id="toast"></div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
